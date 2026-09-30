@@ -88,7 +88,7 @@ var HEADERS = { TSS_SHELL: "X-TSS_SHELL" };
 * the dev styles URL for route-scoped CSS collection.
 */
 async function getStartManifest(matchedRoutes) {
-	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-N8Ok4cUv.mjs");
+	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-D-4CWEJl.mjs");
 	const startManifest = tsrStartManifest();
 	let routes = startManifest.routes;
 	routes[rootRouteId];
@@ -110,15 +110,15 @@ async function getStartManifest(matchedRoutes) {
 var manifest = {
 	"7c741528990a5ceeaea2612cce5f9905baeff8a0b9400150d95239bcc1377fe8": {
 		functionName: "getQuizFn_createServerFn_handler",
-		importer: () => import("./fns-BV2qdGI1.mjs")
+		importer: () => import("./fns-BtK_3Z9j.mjs")
 	},
 	"e33781ec4214bf2d60fb339dfe6410f511a1fa9466943886227dfd126fe3b9bd": {
 		functionName: "getPokemonFn_createServerFn_handler",
-		importer: () => import("./fns-BV2qdGI1.mjs")
+		importer: () => import("./fns-BtK_3Z9j.mjs")
 	},
 	"f3c5120a23c69dbbfee57f830421c681286a619b0caa1a8de04c5ae15f56bb4b": {
 		functionName: "askDexFn_createServerFn_handler",
-		importer: () => import("./fns-BV2qdGI1.mjs")
+		importer: () => import("./fns-BtK_3Z9j.mjs")
 	}
 };
 async function getServerFnById(id, access) {
@@ -1388,7 +1388,7 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
 	const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-		import("./router-Bp2TsUdV.mjs"),
+		import("./router-Z-G7S6pu.mjs"),
 		import("./start-5Z2QO8AU.mjs"),
 		import("./empty-plugin-adapters-D9UWiqvJ.mjs")
 	]);
