@@ -1,7 +1,17 @@
 import { isMuted } from "./sfx";
 
+function getSynth(): SpeechSynthesis | null {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    return null;
+  }
+  return window.speechSynthesis;
+}
+
 function pickSpanishVoice(): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
+  const synth = getSynth();
+  if (!synth) return null;
+
+  const voices = synth.getVoices();
   return (
     voices.find((v) => v.lang.toLowerCase().startsWith("es-mx")) ??
     voices.find((v) => v.lang.toLowerCase().startsWith("es-es")) ??
@@ -11,29 +21,35 @@ function pickSpanishVoice(): SpeechSynthesisVoice | null {
 }
 
 export function speakDex(text: string) {
-  if (typeof window === "undefined") return;
-  if (isMuted()) return;
-  const synth = window.speechSynthesis;
+  const synth = getSynth();
+  if (!synth || isMuted()) return;
+
   synth.cancel();
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = "es-ES";
   utter.rate = 0.94;
   utter.pitch = 0.82;
   utter.volume = 0.95;
+
   const voice = pickSpanishVoice();
   if (voice) utter.voice = voice;
+
   synth.speak(utter);
 }
 
 export function stopSpeak() {
-  if (typeof window === "undefined") return;
-  window.speechSynthesis.cancel();
+  const synth = getSynth();
+  if (!synth) return;
+
+  synth.cancel();
 }
 
 export function warmupVoices() {
-  if (typeof window === "undefined") return;
-  window.speechSynthesis.getVoices();
-  window.speechSynthesis.addEventListener("voiceschanged", () => {
-    window.speechSynthesis.getVoices();
+  const synth = getSynth();
+  if (!synth) return;
+
+  synth.getVoices();
+  synth.addEventListener("voiceschanged", () => {
+    synth.getVoices();
   });
 }
