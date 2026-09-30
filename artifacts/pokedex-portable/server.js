@@ -1,12 +1,8 @@
-import express from 'express';
-import cors from 'cors';
-import axios from 'axios';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { localAsk } from './ai.js';   // ← asegúrate de que el archivo se llame ai.js
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const path = require('path');
+const { localAsk } = require('./ai');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -34,11 +30,9 @@ function setCache(key, data) {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-// Validar ID o nombre dentro de los primeros 151
 async function resolvePokemon(idOrName) {
   const key = String(idOrName).toLowerCase().trim();
   
-  // Si es número
   if (/^\d+$/.test(key)) {
     const num = parseInt(key, 10);
     if (num < 1 || num > MAX_POKEMON) {
@@ -49,7 +43,6 @@ async function resolvePokemon(idOrName) {
     return num;
   }
 
-  // Buscar por nombre (solo gen 1)
   const cached = getCached(`name-${key}`);
   if (cached) return cached;
 
@@ -71,7 +64,6 @@ async function resolvePokemon(idOrName) {
   }
 }
 
-// Obtener datos completos de un Pokémon
 async function getPokemonData(id) {
   const cacheKey = `pokemon-${id}`;
   const cached = getCached(cacheKey);
@@ -85,35 +77,27 @@ async function getPokemonData(id) {
   const p = pokemonRes.data;
   const s = speciesRes.data;
 
-  // Descripción en español (o inglés de fallback)
   const flavor = s.flavor_text_entries.find(e => e.language.name === 'es') 
     || s.flavor_text_entries.find(e => e.language.name === 'en');
   
-  // Nombre en español
   const nameEs = s.names.find(n => n.language.name === 'es')?.name || p.name;
-
-  // Generación
   const generation = s.generation?.name || 'generation-i';
 
-  // Tipos
   const types = p.types.map(t => ({
     name: t.type.name,
     slot: t.slot
   }));
 
-  // Stats
   const stats = p.stats.map(st => ({
     name: st.stat.name,
     base: st.base_stat
   }));
 
-  // Habilidades
   const abilities = p.abilities.map(a => ({
     name: a.ability.name,
     is_hidden: a.is_hidden
   }));
 
-  // Movimientos destacados
   const moves = p.moves
     .filter(m => m.version_group_details.some(v => 
       v.version_group.name === 'red-blue' || v.version_group.name === 'yellow'
@@ -121,7 +105,6 @@ async function getPokemonData(id) {
     .slice(0, 6)
     .map(m => m.move.name);
 
-  // Sprites
   const sprites = {
     front: p.sprites.front_default,
     back: p.sprites.back_default,
@@ -131,7 +114,6 @@ async function getPokemonData(id) {
     gen1_gray: `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-i/red-blue/gray/${id}.png`
   };
 
-  // Cry
   const cry = `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${id}.ogg`;
 
   const data = {
