@@ -1,7 +1,12 @@
-const express = require('express');
-const cors = require('cors');
-const axios = require('axios');
-const { localAsk } = require('./ai');
+import express from 'express';
+import cors from 'cors';
+import axios from 'axios';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { localAsk } from './ai.js';   // ← asegúrate de que el archivo se llame ai.js
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -108,7 +113,7 @@ async function getPokemonData(id) {
     is_hidden: a.is_hidden
   }));
 
-  // Movimientos destacados (primeros 4 de nivel 1 o similares)
+  // Movimientos destacados
   const moves = p.moves
     .filter(m => m.version_group_details.some(v => 
       v.version_group.name === 'red-blue' || v.version_group.name === 'yellow'
@@ -116,7 +121,7 @@ async function getPokemonData(id) {
     .slice(0, 6)
     .map(m => m.move.name);
 
-  // Sprite preferido (oficial artwork + gen1)
+  // Sprites
   const sprites = {
     front: p.sprites.front_default,
     back: p.sprites.back_default,
@@ -126,15 +131,15 @@ async function getPokemonData(id) {
     gen1_gray: `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-i/red-blue/gray/${id}.png`
   };
 
-  // Cry (sonido)
+  // Cry
   const cry = `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${id}.ogg`;
 
   const data = {
     id: p.id,
     name: p.name,
     nameEs,
-    height: p.height / 10, // metros
-    weight: p.weight / 10, // kg
+    height: p.height / 10,
+    weight: p.weight / 10,
     base_experience: p.base_experience,
     types,
     stats,
@@ -160,14 +165,12 @@ async function getPokemonData(id) {
 
 // ========== RUTAS API ==========
 
-// Listar todos (solo ids y nombres básicos para el grid)
 app.get('/api/pokemon', async (req, res) => {
   try {
     const cached = getCached('list-151');
     if (cached) return res.json(cached);
 
     const list = [];
-    // PokeAPI permite limit=151
     const response = await axios.get(`${POKEAPI_BASE}/pokemon?limit=${MAX_POKEMON}&offset=0`);
     
     for (const item of response.data.results) {
@@ -187,7 +190,6 @@ app.get('/api/pokemon', async (req, res) => {
   }
 });
 
-// Obtener un Pokémon por id o nombre
 app.get('/api/pokemon/:idOrName', async (req, res) => {
   try {
     const id = await resolvePokemon(req.params.idOrName);
@@ -202,18 +204,16 @@ app.get('/api/pokemon/:idOrName', async (req, res) => {
   }
 });
 
-// Pokémon aleatorio (para el quiz de sombras)
 app.get('/api/random', async (req, res) => {
   try {
     const id = Math.floor(Math.random() * MAX_POKEMON) + 1;
     const data = await getPokemonData(id);
-    // Devolvemos solo lo necesario para el quiz (sin revelar el nombre completo al cliente si se quiere, pero lo hacemos en frontend)
     res.json({
       id: data.id,
       name: data.name,
       nameEs: data.nameEs,
       sprite: data.sprites.official || data.sprites.front,
-      silhouette: data.sprites.front // el frontend aplicará filtro CSS
+      silhouette: data.sprites.front
     });
   } catch (err) {
     console.error(err);
@@ -221,7 +221,6 @@ app.get('/api/random', async (req, res) => {
   }
 });
 
-// Buscar (misma lógica)
 app.get('/api/search', async (req, res) => {
   const q = req.query.q;
   if (!q) {
@@ -240,8 +239,6 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// Profesor Dex: IA local incluida (no usa .env). Si existe XAI_API_KEY en el
-// entorno del sistema, se usa Grok; si falla o no hay clave, responde local.
 app.post('/api/ai', async (req, res) => {
   const body = req.body || {};
   const payload = {
@@ -262,8 +259,7 @@ app.post('/api/ai', async (req, res) => {
           messages: [
             {
               role: 'system',
-              content:
-                'Eres el módulo de IA de una Pokédex de Kanto (solo 001-151). Español, breve, sin emojis.',
+              content: 'Eres el módulo de IA de una Pokédex de Kanto (solo 001-151). Español, breve, sin emojis.',
             },
             { role: 'user', content: payload.question || 'Explícame este Pokémon.' },
           ],
