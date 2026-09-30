@@ -22,6 +22,9 @@ import {
   loadMutePref,
   playBoot,
   playBattleAttack,
+  playBattleDangerLoop,
+  playBattleFlee,
+  playBattleHeal,
   playBattleHit,
   playBattleLoop,
   playClick,
@@ -37,7 +40,7 @@ import {
   unlockAudio,
 } from "@/lib/pokemon/sfx";
 import { speakDex, stopSpeak, warmupVoices } from "@/lib/pokemon/voice";
-import type { PokemonDetail, QuizPokemon } from "@/lib/pokemon/types";
+import type { EvolutionNode, PokemonDetail, QuizPokemon } from "@/lib/pokemon/types";
 import { cn, padDex, titleCase } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -296,7 +299,7 @@ export function PokedexApp() {
                         />
                       )}
                       {tab === "quiz" && <QuizView onOpen={openPokemon} />}
-                      {tab === "game" && <GameView log={log} muted={muted} onMenu={() => setTab("list")} />}
+                      {tab === "game" && <GameView log={log} muted={muted} onMenu={() => goTab("list")} />}
                       {tab === "ai" && <AiView selectedId={selectedId} />}
                       {tab === "compare" && (
                         <CompareView
@@ -338,7 +341,7 @@ export function PokedexApp() {
               <span>{powered ? lcdName || (listViewMode ? "Índice" : tabLabel(tab)) : "Pulsa el botón verde"}</span>
             </div>
             <div className="dex-blue-pad">
-              {([["list", "LISTA"], ["detail", "FICHA"], ["quiz", "SOMBRA"], ["game", "JUEGO"]] as const).map(([id, label]) => (
+              {([["list", "LISTA"], ["detail", "FICHA"], ["quiz", "SOMBRA"], ["game", "BATALLA"]] as const).map(([id, label]) => (
                 <button key={id} type="button" className={cn("btn-press", tab === id && powered && "is-on")} onClick={() => !powered ? powerOn() : goTab(id)}>
                   {label}
                 </button>
@@ -1473,24 +1476,28 @@ function GameView({
   const [encounterId, setEncounterId] = useState<number>(1);
   const [playerId, setPlayerId] = useState(1);
   const [partyInitialized, setPartyInitialized] = useState(false);
+  const [battleAnimation, setBattleAnimation] = useState<BattleAnimation>("idle");
+  const battleAnimationTimer = useRef<number | null>(null);
   const [pokemonProgress, setPokemonProgress] = useState<PokemonProgressMap>(loadPokemonProgress);
-  const [playerHp, setPlayerHp] = useState(40);
+  const [playerHp, setPlayerHp] = useState(60);
   const [enemyHp, setEnemyHp] = useState(30);
   const [enemyMaxHp, setEnemyMaxHp] = useState(30);
+  const [enemyAttackStage, setEnemyAttackStage] = useState(0);
+  const [enemyDefenseStage, setEnemyDefenseStage] = useState(0);
   const [message, setMessage] = useState("Un Pokémon salvaje apareció.");
   const [enemyDefeated, setEnemyDefeated] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [choosingMove, setChoosingMove] = useState(false);
   const [bagOpen, setBagOpen] = useState(false);
   const [partyOpen, setPartyOpen] = useState(false);
-  const [moves, setMoves] = useState<string[]>(["tackle", "water-gun", "bubble", "tail-whip"]);
-  const [inventory, setInventory] = useState<(typeof WORLD_ITEMS)[number][]>([
+  const [moves, setMoves] = useState<string[]>([]);
+  const [inventory, setInventory] = useState<BattleItem[]>([
     WORLD_ITEMS[0], WORLD_ITEMS[2], WORLD_ITEMS[3],
   ]);
 
   const encounter = CATALOG.find((p) => p.id === encounterId) ?? CATALOG[0];
   const player = CATALOG.find((pokemon) => pokemon.id === playerId) ?? CATALOG[6];
-  const playerProgress = pokemonProgress[playerId] ?? { level: 1, xp: 0 };
+  const playerProgress = pokemonProgress[playerId] ?? { level: 5, xp: 0 };
   const playerLevel = playerProgress.level;
   const playerXp = playerProgress.xp;
   const playerMaxHp = 40 + (playerLevel - 1) * 5;
@@ -1507,19 +1514,10 @@ function GameView({
     const firstCaught = CATALOG.find((pokemon) => log.isCaught(pokemon.id));
     if (firstCaught) {
       setPlayerId(firstCaught.id);
-      setPlayerHp(40 + ((pokemonProgress[firstCaught.id]?.level ?? 1) - 1) * 5);
+      setPlayerHp(40 + ((pokemonProgress[firstCaught.id]?.level ?? 5) - 1) * 5);
     }
     setPartyInitialized(true);
   }, [log, partyInitialized, pokemonProgress]);
-
-  useEffect(() => {
-    if (muted) {
-      stopLoop();
-      return;
-    }
-    playBattleLoop();
-    return stopLoop;
-  }, [muted]);
 
   useEffect(() => {
     if (!partyInitialized) return;
@@ -1539,17 +1537,42 @@ function GameView({
   const playerRatio = Math.max(0, Math.min(100, (playerHp / playerMaxHp) * 100));
   const xpThreshold = playerLevel * 20;
   const xpRatio = Math.min(100, (playerXp / xpThreshold) * 100);
+  const dangerMusic = playerHp > 0 && playerRatio <= 50;
 
   useEffect(() => {
-    const available = playerQuery.data?.moves ?? [];
-    if (available.length === 0) return;
+    if (muted || gameOver) {
+      stopLoop();
+      return;
+    }
+    if (dangerMusic) playBattleDangerLoop();
+    else playBattleLoop();
+    return stopLoop;
+  }, [muted, dangerMusic, gameOver]);
+
+  useEffect(() => () => {
+    if (battleAnimationTimer.current != null) {
+      window.clearTimeout(battleAnimationTimer.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    const available = (playerQuery.data?.learnableMoves ?? [])
+      .filter((move) => move.level <= playerLevel)
+      .map((move) => move.name);
+    if (available.length === 0) {
+      setMoves([]);
+      return;
+    }
     const shuffled = [...new Set(available)];
     for (let index = shuffled.length - 1; index > 0; index -= 1) {
       const swapIndex = Math.floor(Math.random() * (index + 1));
       [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
     }
-    setMoves(shuffled.slice(0, 4));
-  }, [playerQuery.data]);
+    const statusMove = shuffled.find((move) => STATUS_MOVE_EFFECTS[move]);
+    setMoves(statusMove
+      ? [statusMove, ...shuffled.filter((move) => move !== statusMove)].slice(0, 4)
+      : shuffled.slice(0, 4));
+  }, [playerQuery.data, playerLevel]);
 
   function spawnRandomEncounter() {
     const next = CATALOG[Math.floor(Math.random() * CATALOG.length)];
@@ -1557,6 +1580,8 @@ function GameView({
     setEncounterId(next.id);
     setEnemyHp(nextHp);
     setEnemyMaxHp(nextHp);
+    setEnemyAttackStage(0);
+    setEnemyDefenseStage(0);
     setEnemyDefeated(false);
     setChoosingMove(false);
     setBagOpen(false);
@@ -1566,7 +1591,9 @@ function GameView({
   }
 
   function awardExperience() {
-    const gained = 4 + encounterLevel * 3;
+    const levelGap = Math.max(0, encounterLevel - playerLevel);
+    const levelBonus = levelGap >= 3 ? levelGap * 4 : 0;
+    const gained = 4 + encounterLevel * 3 + levelBonus;
     let remainingXp = playerXp + gained;
     let nextLevel = playerLevel;
     while (remainingXp >= nextLevel * 20) {
@@ -1574,48 +1601,168 @@ function GameView({
       nextLevel += 1;
     }
     const levelsGained = nextLevel - playerLevel;
+    let evolvedPokemonId = playerId;
+    let evolvedPokemonName: string | null = null;
+    const evolutionChain = playerQuery.data?.evolution ?? [];
+    for (let level = playerLevel + 1; level <= nextLevel; level += 1) {
+      const evolution = findLevelEvolution(evolutionChain, evolvedPokemonId, level);
+      if (evolution) {
+        evolvedPokemonId = evolution.id;
+        evolvedPokemonName = CATALOG.find((pokemon) => pokemon.id === evolution.id)?.nameEs ?? evolution.name;
+      }
+    }
     const nextProgress = {
       ...pokemonProgress,
       [playerId]: { level: nextLevel, xp: remainingXp },
+      [evolvedPokemonId]: { level: nextLevel, xp: remainingXp },
     };
     setPokemonProgress(nextProgress);
     savePokemonProgress(nextProgress);
+    if (evolvedPokemonId !== playerId) {
+      const evolved = CATALOG.find((pokemon) => pokemon.id === evolvedPokemonId);
+      setPlayerId(evolvedPokemonId);
+      setMoves([]);
+      log.markSeen(evolvedPokemonId);
+      if (!log.isCaught(evolvedPokemonId)) log.toggleCaught(evolvedPokemonId);
+      evolvedPokemonName = evolved?.nameEs ?? "su siguiente etapa";
+    }
     if (levelsGained > 0) {
       setPlayerHp((current) => current + levelsGained * 5);
-      setMessage(`¡${encounter.nameEs} cayó! ${player.nameEs} ganó ${gained} EXP. y subió al nivel ${nextLevel}.`);
-    } else {
-      setMessage(`¡${encounter.nameEs} cayó! ${player.nameEs} ganó ${gained} EXP.`);
     }
+    setMessage(
+      `¡${encounter.nameEs} cayó! ${player.nameEs} ganó ${gained} EXP${levelsGained > 0 ? ` y subió al nivel ${nextLevel}` : ""}${evolvedPokemonName ? ` y evolucionó a ${evolvedPokemonName}` : ""}.`,
+    );
+    return { pokemonId: evolvedPokemonId, progress: nextProgress };
+  }
+
+  function evolvePokemon(
+    evolution: EvolutionNode,
+    fromId: number,
+    sourceProgress: PokemonProgressMap = pokemonProgress,
+    itemIndex?: number,
+  ) {
+    const progress = sourceProgress[fromId] ?? pokemonProgress[fromId] ?? { level: 5, xp: 0 };
+    const nextProgress = { ...sourceProgress, [evolution.id]: progress };
+    const fromPokemon = CATALOG.find((pokemon) => pokemon.id === fromId);
+    const toPokemon = CATALOG.find((pokemon) => pokemon.id === evolution.id);
+    setPokemonProgress(nextProgress);
+    savePokemonProgress(nextProgress);
+    setPlayerId(evolution.id);
+    setMoves([]);
+    if (battleAnimationTimer.current != null) window.clearTimeout(battleAnimationTimer.current);
+    setBattleAnimation("player-switch");
+    battleAnimationTimer.current = window.setTimeout(() => {
+      setBattleAnimation("idle");
+      battleAnimationTimer.current = null;
+    }, 420);
+    if (itemIndex != null) {
+      setInventory((current) => current.filter((_, index) => index !== itemIndex));
+    }
+    log.markSeen(evolution.id);
+    if (!log.isCaught(evolution.id)) log.toggleCaught(evolution.id);
+    setMessage(`¡${fromPokemon?.nameEs ?? player.nameEs} evolucionó a ${toPokemon?.nameEs ?? evolution.name}!`);
+    return nextProgress;
+  }
+
+  function animateBattleSequence(sequence: BattleAnimationStep[]) {
+    if (battleAnimationTimer.current != null) {
+      window.clearTimeout(battleAnimationTimer.current);
+    }
+    let stepIndex = 0;
+    const playNextStep = () => {
+      const step = sequence[stepIndex];
+      if (!step) {
+        if (sequence.at(-1)?.action !== "flee") setBattleAnimation("idle");
+        battleAnimationTimer.current = null;
+        return;
+      }
+      setBattleAnimation(step.action);
+      battleAnimationTimer.current = window.setTimeout(() => {
+        stepIndex += 1;
+        playNextStep();
+      }, step.duration);
+    };
+    playNextStep();
   }
 
   function attack(move: string) {
-    if (enemyDefeated || gameOver || playerHp <= 0) return;
+    if (enemyDefeated || gameOver || playerHp <= 0 || battleAnimation !== "idle") return;
     setChoosingMove(false);
     playBattleAttack();
-    const damage = 8 + Math.floor(Math.random() * 14);
-    const nextEnemy = Math.max(0, enemyHp - damage);
-    setEnemyHp(nextEnemy);
+    const moveEffect = STATUS_MOVE_EFFECTS[move];
+    let playerTurnMessage: string;
+    let nextEnemy = enemyHp;
+    let effectiveEnemyAttackStage = enemyAttackStage;
 
-    if (nextEnemy <= 0) {
-      const item = WORLD_ITEMS[Math.floor(Math.random() * WORLD_ITEMS.length)];
-      setInventory((current) => [...current, item]);
-      setEnemyDefeated(true);
+    if (moveEffect) {
+      const currentStage = moveEffect.stat === "attack" ? enemyAttackStage : enemyDefenseStage;
+      if (currentStage > -6) {
+        const nextStage = Math.max(-6, currentStage - moveEffect.stages);
+        if (moveEffect.stat === "attack") {
+          setEnemyAttackStage(nextStage);
+          effectiveEnemyAttackStage = nextStage;
+        }
+        else setEnemyDefenseStage(nextStage);
+        playerTurnMessage = `¡${formatMoveName(move)}! El ${moveEffect.label} de ${encounter.nameEs} bajó.`;
+      } else {
+        playerTurnMessage = `¡${formatMoveName(move)}! ${encounter.nameEs} no puede bajar más su ${moveEffect.label}.`;
+      }
+      animateBattleSequence([
+        { action: "player-attack", duration: 300 },
+        { action: "enemy-debuff", duration: 220 },
+        { action: "enemy-attack", duration: 300 },
+        { action: "player-hit", duration: 220 },
+      ]);
+    } else {
+      const baseDamage = 8 + Math.floor(Math.random() * 14);
+      const damage = Math.max(1, Math.floor(baseDamage / stageMultiplier(enemyDefenseStage)));
+      nextEnemy = Math.max(0, enemyHp - damage);
+      setEnemyHp(nextEnemy);
       playBattleHit();
-      awardExperience();
-      setMessage((current) => `${current} Dejó caer: ${item.name}.`);
-      return;
+
+      if (nextEnemy <= 0) {
+        animateBattleSequence([
+          { action: "player-attack", duration: 300 },
+          { action: "enemy-hit", duration: 280 },
+        ]);
+        setEnemyDefeated(true);
+        const item = Math.random() < 0.18
+          ? EVOLUTION_STONES[Math.floor(Math.random() * EVOLUTION_STONES.length)]
+          : WORLD_ITEMS[Math.floor(Math.random() * WORLD_ITEMS.length)];
+        const reward = awardExperience();
+        const itemEvolution = item.effect === "evolution"
+          ? findItemEvolution(playerQuery.data?.evolution ?? [], reward.pokemonId, item.method)
+          : undefined;
+        if (itemEvolution) {
+          evolvePokemon(itemEvolution, reward.pokemonId, reward.progress);
+          setMessage(`¡${encounter.nameEs} dejó caer ${item.name}! ¡${player.nameEs} evolucionó a ${itemEvolution.name}!`);
+        } else {
+          setInventory((current) => [...current, item]);
+          setMessage((current) => `${current} Dejó caer: ${item.name}.`);
+        }
+        return;
+      }
+
+      playerTurnMessage = `¡${formatMoveName(move)}! ${encounter.nameEs} recibió ${damage} PS de daño.`;
+      animateBattleSequence([
+        { action: "player-attack", duration: 300 },
+        { action: "enemy-hit", duration: 220 },
+        { action: "enemy-attack", duration: 300 },
+        { action: "player-hit", duration: 220 },
+      ]);
     }
 
     playBattleHit();
     const enemyDamage = 5 + Math.floor(Math.random() * 10);
-    const nextPlayerHp = Math.max(0, playerHp - enemyDamage);
+    const reducedEnemyDamage = Math.max(1, Math.floor(enemyDamage * stageMultiplier(effectiveEnemyAttackStage)));
+    const nextPlayerHp = Math.max(0, playerHp - reducedEnemyDamage);
     setPlayerHp(nextPlayerHp);
     setMessage(
       nextPlayerHp === 0
         ? reservePokemon.length > 0
           ? `¡${player.nameEs} se debilitó! Elige otro Pokémon.`
           : `¡${encounter.nameEs} debilitó a ${player.nameEs}! ¡Has perdido!`
-        : `¡${formatMoveName(move)}! ¡${encounter.nameEs} contraataca!`,
+        : `${playerTurnMessage} ¡${encounter.nameEs} contraataca y causa ${reducedEnemyDamage} PS de daño.`,
     );
     if (nextPlayerHp === 0) {
       if (reservePokemon.length > 0) setPartyOpen(true);
@@ -1627,9 +1774,25 @@ function GameView({
     const item = inventory[itemIndex];
     if (!item) return;
     if (item.effect === "heal" && playerHp < playerMaxHp) {
+      animateBattleSequence([{ action: "player-heal", duration: 650 }]);
+      playBattleHeal();
       setPlayerHp((current) => Math.min(playerMaxHp, current + item.power));
       setInventory((current) => current.filter((_, index) => index !== itemIndex));
       setMessage(`${player.nameEs} usó ${item.name}.`);
+      setBagOpen(false);
+      return;
+    }
+    if (item.effect === "evolution") {
+      const evolution = findItemEvolution(
+        playerQuery.data?.evolution ?? [],
+        playerId,
+        item.method,
+      );
+      if (!evolution) {
+        setMessage(`${player.nameEs} no puede evolucionar con ${item.name}.`);
+        return;
+      }
+      evolvePokemon(evolution, playerId, pokemonProgress, itemIndex);
       setBagOpen(false);
       return;
     }
@@ -1663,6 +1826,8 @@ function GameView({
 
   function flee() {
     if (enemyDefeated || gameOver) return;
+    animateBattleSequence([{ action: "flee", duration: 650 }]);
+    playBattleFlee();
     setGameOver(true);
     setChoosingMove(false);
     setBagOpen(false);
@@ -1677,9 +1842,10 @@ function GameView({
   }
 
   function choosePokemon(id: number) {
+    animateBattleSequence([{ action: "player-switch", duration: 420 }]);
     setPlayerId(id);
-    setPlayerHp(40 + ((pokemonProgress[id]?.level ?? 1) - 1) * 5);
-    setMoves(["tackle", "water-gun", "bubble", "tail-whip"]);
+    setPlayerHp(40 + ((pokemonProgress[id]?.level ?? 5) - 1) * 5);
+    setMoves([]);
     setPartyOpen(false);
     setMessage(`${CATALOG.find((pokemon) => pokemon.id === id)?.nameEs} entra en combate.`);
   }
@@ -1694,18 +1860,12 @@ function GameView({
       <div className="battle-header">
         <div className="battle-header__brand">
           <span className="battle-header__icon" aria-hidden />
-          <span>Wiki Index</span>
+          <span>Pokémon · Kanto</span>
         </div>
         <span className="battle-header__team">Equipo {teamPokemon.length}/{PARTY_LIMIT}</span>
-        <div className="battle-header__controls" aria-hidden>
-          <span>‹</span>
-          <span>›</span>
-          <span>⋮</span>
-          <span>×</span>
-        </div>
       </div>
 
-      <div className="battle-field">
+      <div className={cn("battle-field", dangerMusic && "battle-field--danger")}>
         <div className="battle-status battle-status--enemy">
           <div className="battle-status__heading">
             <span className="battle-status__name">{encounter.nameEs}</span>
@@ -1716,7 +1876,15 @@ function GameView({
           </div>
         </div>
 
-        <div className="battle-sprite battle-sprite--left">
+        <div className={cn(
+          "battle-sprite battle-sprite--left",
+          battleAnimation === "idle" && "battle-sprite--idle",
+          battleAnimation === "player-attack" && "battle-sprite--attacking",
+          battleAnimation === "player-hit" && "battle-sprite--hit",
+          battleAnimation === "player-heal" && "battle-sprite--healing",
+          battleAnimation === "player-switch" && "battle-sprite--switching",
+          battleAnimation === "flee" && "battle-sprite--fleeing",
+        )}>
           <img
             src={battleSpriteUrl(playerId, "back")}
             alt={`${player.nameEs} de espaldas`}
@@ -1727,7 +1895,14 @@ function GameView({
           />
         </div>
 
-        <div className="battle-sprite battle-sprite--right">
+        <div className={cn(
+          "battle-sprite battle-sprite--right",
+          battleAnimation === "idle" && "battle-sprite--idle",
+          battleAnimation === "enemy-attack" && "battle-sprite--attacking",
+          battleAnimation === "enemy-hit" && "battle-sprite--hit",
+          battleAnimation === "enemy-debuff" && "battle-sprite--debuff",
+          battleAnimation === "flee" && "battle-sprite--fleeing",
+        )}>
           <img
             src={battleSpriteUrl(encounter.id, "front")}
             alt={encounter.nameEs}
@@ -1743,7 +1918,10 @@ function GameView({
             <span className="battle-status__name">{player.nameEs}</span>
             <span className="battle-status__level">Lv {playerLevel}</span>
           </div>
-          <div className="battle-status__bar battle-status__bar--player">
+          <div className={cn(
+            "battle-status__bar battle-status__bar--player",
+            dangerMusic && "battle-status__bar--danger",
+          )}>
             <span style={{ width: `${playerRatio}%` }} />
           </div>
           <div className="battle-status__bar battle-status__bar--xp">
@@ -1753,7 +1931,7 @@ function GameView({
         </div>
       </div>
 
-      <div className="battle-message">{message}</div>
+      <div key={message} className="battle-message">{message}</div>
 
       {gameOver || (playerHp <= 0 && reservePokemon.length === 0) ? (
         <div className="battle-actions">
@@ -1766,7 +1944,7 @@ function GameView({
         <div className="battle-inventory">
           <div className="battle-inventory__heading">
             <span>Mochila</span>
-            <button type="button" onClick={() => setBagOpen(false)} aria-label="Cerrar mochila">×</button>
+            <button type="button" onClick={() => { playClick(); setBagOpen(false); }} aria-label="Cerrar mochila">×</button>
           </div>
           {inventory.length === 0 ? (
             <p>La mochila está vacía.</p>
@@ -1782,7 +1960,7 @@ function GameView({
         <div className="battle-inventory battle-party">
           <div className="battle-inventory__heading">
             <span>Equipo {teamPokemon.length}/{PARTY_LIMIT}{playerHp <= 0 ? " · Elige otro" : ""}</span>
-            {playerHp > 0 && <button type="button" onClick={() => setPartyOpen(false)} aria-label="Cerrar equipo">×</button>}
+            {playerHp > 0 && <button type="button" onClick={() => { playClick(); setPartyOpen(false); }} aria-label="Cerrar equipo">×</button>}
           </div>
           {reservePokemon.length === 0 ? (
             <p>No quedan compañeros disponibles.</p>
@@ -1797,24 +1975,28 @@ function GameView({
         </div>
       ) : choosingMove ? (
         <div className="battle-actions battle-actions--moves">
-          {moves.map((move) => (
-            <button key={move} type="button" onClick={() => attack(move)} className="btn-press battle-actions__btn">
-              {formatMoveName(move)}
-            </button>
-          ))}
-          <button type="button" onClick={() => setChoosingMove(false)} className="btn-press battle-actions__back">
+          {moves.length > 0 ? moves.map((move) => (
+              <button key={move} type="button" onClick={() => attack(move)} className="btn-press battle-actions__btn">
+                {formatMoveName(move)}
+              </button>
+            )) : (
+              <p className="battle-actions__loading">
+                {playerQuery.isPending ? "Cargando movimientos…" : "No hay movimientos aprendidos a este nivel."}
+              </p>
+            )}
+          <button type="button" onClick={() => { playClick(); setChoosingMove(false); }} className="btn-press battle-actions__back">
             Volver
           </button>
         </div>
       ) : (
         <div className="battle-actions">
-          <button type="button" onClick={() => setChoosingMove(true)} className="btn-press battle-actions__btn battle-actions__btn--primary">
+          <button type="button" onClick={() => { playClick(); setChoosingMove(true); }} className="btn-press battle-actions__btn battle-actions__btn--primary">
             Luchar
           </button>
-          <button type="button" onClick={() => setBagOpen(true)} className="btn-press battle-actions__btn">
+          <button type="button" onClick={() => { playClick(); setBagOpen(true); }} className="btn-press battle-actions__btn">
             Mochila
           </button>
-          <button type="button" onClick={() => setPartyOpen(true)} className="btn-press battle-actions__btn">
+          <button type="button" onClick={() => { playClick(); setPartyOpen(true); }} className="btn-press battle-actions__btn">
             Pokémon
           </button>
           <button type="button" onClick={flee} className="btn-press battle-actions__btn">
@@ -1828,6 +2010,36 @@ function GameView({
 
 type PokemonProgress = { level: number; xp: number };
 type PokemonProgressMap = Record<number, PokemonProgress>;
+type BattleAnimation = "idle" | "player-attack" | "enemy-hit" | "enemy-debuff" | "enemy-attack" | "player-hit" | "player-heal" | "player-switch" | "flee";
+type BattleAnimationStep = {
+  action: Exclude<BattleAnimation, "idle">;
+  duration: number;
+};
+
+const STATUS_MOVE_EFFECTS: Record<string, { stat: "attack" | "defense"; stages: number; label: string }> = {
+  growl: { stat: "attack", stages: 1, label: "ataque" },
+  leer: { stat: "defense", stages: 1, label: "defensa" },
+  "tail-whip": { stat: "defense", stages: 1, label: "defensa" },
+  screech: { stat: "defense", stages: 2, label: "defensa" },
+};
+
+function stageMultiplier(stage: number) {
+  return stage >= 0 ? (2 + stage) / 2 : 2 / (2 - stage);
+}
+
+function findLevelEvolution(chain: EvolutionNode[][], fromId: number, level: number) {
+  return chain.flat().find((evolution) => {
+    if (evolution.fromId !== fromId || !evolution.method) return false;
+    const requiredLevel = evolution.method.match(/^Nv\.\s*(\d+)$/);
+    return requiredLevel != null && Number(requiredLevel[1]) <= level;
+  });
+}
+
+function findItemEvolution(chain: EvolutionNode[][], fromId: number, method: string) {
+  return chain.flat().find(
+    (evolution) => evolution.fromId === fromId && evolution.method === method,
+  );
+}
 
 const BATTLE_PROGRESS_KEY = "pokedex-gen1-battle-progress";
 
@@ -1842,7 +2054,7 @@ function loadPokemonProgress(): PokemonProgressMap {
       const progress = value as Record<string, unknown>;
       if (typeof progress.level !== "number" || typeof progress.xp !== "number") return [];
       return [[id, {
-        level: Math.max(1, Math.floor(progress.level)),
+        level: Math.max(5, Math.floor(progress.level)),
         xp: Math.max(0, Math.floor(progress.xp)),
       }] as const];
     });
@@ -1867,6 +2079,16 @@ const WORLD_ITEMS = [
   { name: "Cebo", effect: "attract", power: 0 },
 ] as const;
 
+const EVOLUTION_STONES = [
+  { name: "Piedra Fuego", effect: "evolution", method: "fire stone", power: 0 },
+  { name: "Piedra Agua", effect: "evolution", method: "water stone", power: 0 },
+  { name: "Piedra Trueno", effect: "evolution", method: "thunder stone", power: 0 },
+  { name: "Piedra Hoja", effect: "evolution", method: "leaf stone", power: 0 },
+  { name: "Piedra Lunar", effect: "evolution", method: "moon stone", power: 0 },
+] as const;
+
+type BattleItem = (typeof WORLD_ITEMS)[number] | (typeof EVOLUTION_STONES)[number];
+
 function battleSpriteUrl(id: number, side: "front" | "back") {
   const root = "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-i/red-blue";
   return side === "back"
@@ -1878,6 +2100,13 @@ function formatMoveName(move: string) {
   const spanishNames: Record<string, string> = {
     "water-gun": "Pistola Agua",
     "tail-whip": "Látigo",
+    growl: "Gruñido",
+    leer: "Malicioso",
+    screech: "Chirrido",
+    "poison-powder": "Polvo Veneno",
+    "razor-leaf": "Hoja Afilada",
+    "take-down": "Derribo",
+    tackle: "Placaje",
     "bubble": "Burbuja",
     "quick-attack": "Ataque Rápido",
     "vine-whip": "Látigo Cepa",

@@ -151,30 +151,73 @@ export function playBattleLoop() {
   if (muted) return;
   const motif = () => {
     playNotes([
-      { freq: 262, at: 0, dur: 0.12, type: "square", gain: 0.018 },
-      { freq: 330, at: 0.15, dur: 0.12, type: "square", gain: 0.018 },
-      { freq: 392, at: 0.3, dur: 0.2, type: "triangle", gain: 0.022 },
-      { freq: 196, at: 0.58, dur: 0.18, type: "triangle", gain: 0.02 },
-      { freq: 247, at: 0.82, dur: 0.12, type: "square", gain: 0.018 },
-      { freq: 294, at: 0.98, dur: 0.24, type: "triangle", gain: 0.02 },
+      { freq: 523, at: 0, dur: 0.17, type: "square", gain: 0.028 },
+      { freq: 587, at: 0.22, dur: 0.17, type: "square", gain: 0.028 },
+      { freq: 659, at: 0.44, dur: 0.17, type: "square", gain: 0.03 },
+      { freq: 784, at: 0.66, dur: 0.28, type: "triangle", gain: 0.032 },
+      { freq: 698, at: 0.99, dur: 0.17, type: "square", gain: 0.028 },
+      { freq: 659, at: 1.21, dur: 0.17, type: "square", gain: 0.028 },
+      { freq: 587, at: 1.43, dur: 0.17, type: "square", gain: 0.028 },
+      { freq: 523, at: 1.65, dur: 0.3, type: "triangle", gain: 0.032 },
+      { freq: 131, at: 0, dur: 0.34, type: "triangle", gain: 0.022 },
+      { freq: 196, at: 0.44, dur: 0.34, type: "triangle", gain: 0.022 },
+      { freq: 164, at: 0.88, dur: 0.34, type: "triangle", gain: 0.022 },
+      { freq: 196, at: 1.32, dur: 0.34, type: "triangle", gain: 0.022 },
+      { freq: 131, at: 1.76, dur: 0.34, type: "triangle", gain: 0.022 },
     ]);
   };
   motif();
-  loopId = window.setInterval(motif, 1500);
+  loopId = window.setInterval(motif, 2200);
+}
+
+export function playBattleDangerLoop() {
+  stopLoop();
+  if (muted) return;
+  const motif = () => {
+    playNotes([
+      { freq: 659, at: 0, dur: 0.11, type: "square", gain: 0.035 },
+      { freq: 659, at: 0.16, dur: 0.11, type: "square", gain: 0.035 },
+      { freq: 784, at: 0.32, dur: 0.13, type: "square", gain: 0.038 },
+      { freq: 659, at: 0.5, dur: 0.13, type: "square", gain: 0.035 },
+      { freq: 523, at: 0.82, dur: 0.11, type: "square", gain: 0.035 },
+      { freq: 659, at: 0.98, dur: 0.11, type: "square", gain: 0.035 },
+      { freq: 784, at: 1.14, dur: 0.18, type: "triangle", gain: 0.04 },
+      { freq: 196, at: 0.82, dur: 0.2, type: "triangle", gain: 0.025 },
+    ]);
+  };
+  motif();
+  loopId = window.setInterval(motif, 1650);
 }
 
 export function playBattleAttack() {
   playNotes([
-    { freq: 523, at: 0, dur: 0.055, type: "square", gain: 0.045 },
-    { freq: 698, at: 0.06, dur: 0.06, type: "square", gain: 0.04 },
-    { freq: 880, at: 0.13, dur: 0.08, type: "triangle", gain: 0.035 },
+    { freq: 220, at: 0, dur: 0.09, type: "sawtooth", gain: 0.04 },
+    { freq: 440, at: 0.04, dur: 0.07, type: "square", gain: 0.045 },
+    { freq: 880, at: 0.12, dur: 0.09, type: "square", gain: 0.04 },
   ]);
 }
 
 export function playBattleHit() {
   playNotes([
-    { freq: 196, at: 0.23, dur: 0.08, type: "square", gain: 0.04 },
-    { freq: 147, at: 0.31, dur: 0.1, type: "triangle", gain: 0.035 },
+    { freq: 196, at: 0, dur: 0.08, type: "square", gain: 0.05 },
+    { freq: 110, at: 0.07, dur: 0.14, type: "sawtooth", gain: 0.045 },
+  ]);
+}
+
+export function playBattleHeal() {
+  playNotes([
+    { freq: 523, at: 0, dur: 0.1, type: "square", gain: 0.035 },
+    { freq: 659, at: 0.12, dur: 0.1, type: "square", gain: 0.035 },
+    { freq: 784, at: 0.24, dur: 0.1, type: "square", gain: 0.035 },
+    { freq: 1046, at: 0.36, dur: 0.24, type: "triangle", gain: 0.04 },
+  ]);
+}
+
+export function playBattleFlee() {
+  playNotes([
+    { freq: 784, at: 0, dur: 0.12, type: "square", gain: 0.035 },
+    { freq: 587, at: 0.14, dur: 0.12, type: "square", gain: 0.03 },
+    { freq: 392, at: 0.28, dur: 0.18, type: "triangle", gain: 0.028 },
   ]);
 }
 

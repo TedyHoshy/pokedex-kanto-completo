@@ -81,7 +81,7 @@ type ChainLink = {
 function flattenChain(root: ChainLink): EvolutionNode[][] {
   const stages: EvolutionNode[][] = [];
 
-  function walk(node: ChainLink, method: string | null, depth: number, parentInRange: boolean) {
+  function walk(node: ChainLink, method: string | null, depth: number, parentId: number | null) {
     const id = idFromUrl(node.species.url);
     const inRange = id >= 1 && id <= MAX_DEX;
     const nextDepth = inRange ? depth + 1 : depth;
@@ -90,17 +90,18 @@ function flattenChain(root: ChainLink): EvolutionNode[][] {
       if (!stages[depth].some((n) => n.id === id)) {
         stages[depth].push({
           id,
+          fromId: parentId,
           name: node.species.name,
-          method: parentInRange ? method : null,
+          method: parentId != null ? method : null,
         });
       }
     }
     for (const child of node.evolves_to) {
-      walk(child, formatMethod(child.evolution_details), nextDepth, inRange);
+      walk(child, formatMethod(child.evolution_details), nextDepth, inRange ? id : null);
     }
   }
 
-  walk(root, null, 0, false);
+  walk(root, null, 0, null);
   return stages.filter((s) => s && s.length > 0);
 }
 
@@ -124,7 +125,11 @@ type PokeJson = {
   abilities: { ability: { name: string; url: string }; is_hidden: boolean }[];
   moves: {
     move: { name: string };
-    version_group_details: { version_group: { name: string } }[];
+    version_group_details: {
+      level_learned_at: number;
+      move_learn_method: { name: string };
+      version_group: { name: string };
+    }[];
   }[];
   sprites: {
     front_default: string | null;
@@ -233,6 +238,25 @@ export async function loadPokemon(query: string): Promise<PokemonResult> {
     .map((m) => m.move.name)
     .slice(0, 16);
 
+  const learnableMovesByName = new Map<string, { name: string; level: number }>();
+  for (const { move, version_group_details } of data.moves) {
+    const levels = version_group_details
+      .filter((detail) =>
+        (detail.version_group.name === "red-blue" || detail.version_group.name === "yellow") &&
+        detail.move_learn_method.name === "level-up",
+      )
+      .map((detail) => detail.level_learned_at);
+    if (levels.length === 0) continue;
+    const level = Math.min(...levels);
+    const existing = learnableMovesByName.get(move.name);
+    if (!existing || level < existing.level) {
+      learnableMovesByName.set(move.name, { name: move.name, level });
+    }
+  }
+  const learnableMoves = [...learnableMovesByName.values()].sort(
+    (left, right) => left.level - right.level,
+  );
+
   const stats = [...data.stats]
     .sort(
       (a, b) =>
@@ -271,6 +295,7 @@ export async function loadPokemon(query: string): Promise<PokemonResult> {
     stats,
     abilities: abilityPayloads,
     moves: gen1Moves,
+    learnableMoves,
     sprite: data.sprites.front_default ?? spriteUrl(data.id),
     artwork:
       data.sprites.other?.["official-artwork"]?.front_default ??

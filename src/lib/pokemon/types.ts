@@ -8,8 +8,14 @@ export type PokemonAbility = {
 
 export type EvolutionNode = {
   id: number;
+  fromId: number | null;
   name: string;
   method: string | null;
+};
+
+export type LearnableMove = {
+  name: string;
+  level: number;
 };
 
 export type PokemonDetail = {
@@ -29,6 +35,7 @@ export type PokemonDetail = {
   stats: PokemonStat[];
   abilities: PokemonAbility[];
   moves: string[];
+  learnableMoves: LearnableMove[];
   sprite: string;
   artwork: string;
   model3d: string;
