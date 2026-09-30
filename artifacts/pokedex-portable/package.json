@@ -1,0 +1,14 @@
+{
+  "name": "pokedex-kanto-portable",
+  "version": "1.1.0",
+  "description": "Pokédex Gen 1 portable con IA local (sin .env)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}

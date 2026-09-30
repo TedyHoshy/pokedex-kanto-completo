@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+@theme {
+  --color-pk-red: #c41e3a;
+  --color-pk-red-dark: #8a1528;
+  --color-pk-red-deep: #5c0e1b;
+  --color-pk-bezel: #1a1a1c;
+  --color-pk-screen: #9ecb7a;
+  --color-pk-screen-dim: #7eaa5e;
+  --color-pk-panel: #c6e4a6;
+  --color-pk-ink: #1c2e14;
+  --color-pk-muted: #3d5a32;
+  --color-pk-paper: #f3efe4;
+  --color-pk-lens: #6ec3f0;
+  --color-ok: #2f7d4a;
+  --color-bad: #b42318;
+  --color-type-normal: #c6c6a7;
+  --color-type-fire: #e06a32;
+  --color-type-water: #5a8fe8;
+  --color-type-electric: #e6c84a;
+  --color-type-grass: #6cb050;
+  --color-type-ice: #98d8d8;
+  --color-type-fighting: #b3342c;
+  --color-type-poison: #9a409a;
+  --color-type-ground: #d6b45a;
+  --color-type-flying: #a890f0;
+  --color-type-psychic: #e05080;
+  --color-type-bug: #a8b820;
+  --color-type-rock: #b8a038;
+  --color-type-ghost: #705898;
+  --color-type-dragon: #7038f8;
+  --color-type-dark: #705848;
+  --color-type-steel: #b8b8d0;
+  --color-type-fairy: #ee99ac;
+  --font-display: "Press Start 2P", ui-monospace, monospace;
+  --font-body: "VT323", ui-monospace, monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 18px;
+  --radius-xl: 28px;
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html,
+  body,
+  #app {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: #12131a;
+    color: var(--color-pk-ink);
+    font-family: var(--font-body);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+.pixelated {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.silhouette {
+  filter: brightness(0);
+}
+
+.silhouette.revealed {
+  filter: none;
+}
+
+@keyframes lens-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 10px #6ec3f0;
+  }
+  50% {
+    box-shadow: 0 0 22px #9ad8f8;
+  }
+}
+
+.lens-pulse {
+  animation: lens-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes sprite-idle {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.sprite-idle {
+  animation: sprite-idle 1.6s ease-in-out infinite;
+}
+
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.screen-in {
+  animation: screen-in 0.25s ease-out;
+}

@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Pokédex Gen 1",
+      "hasCanvas": false,
+      "bodyTextLen": 232,
+      "bodyTextHash": "90d96b000fb5639c5fc1c31e7b676672affa1c38edb18948a786edc9e1aa82e3",
+      "bodyTextPrefix": "POKéDEX Kanto · 151 Pulsa para encender el audio: gritos, voz de",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Pokédex Gen 1",
+      "hasCanvas": false,
+      "bodyTextLen": 232,
+      "bodyTextHash": "90d96b000fb5639c5fc1c31e7b676672affa1c38edb18948a786edc9e1aa82e3",
+      "bodyTextPrefix": "POKéDEX Kanto · 151 Pulsa para encender el audio: gritos, voz de",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

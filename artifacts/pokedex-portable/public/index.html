@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pokédex - Generación 1 (151)</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div class="pokedex-container">
+    <!-- CARCASA SUPERIOR ROJA -->
+    <div class="pokedex-top">
+      <div class="lights">
+        <div class="big-light"></div>
+        <div class="small-lights">
+          <span class="red"></span>
+          <span class="yellow"></span>
+          <span class="green"></span>
+        </div>
+      </div>
+      <div class="hinge"></div>
+    </div>
+
+    <!-- PANTALLA PRINCIPAL -->
+    <div class="screen-frame">
+      <div class="screen" id="main-screen">
+        <!-- Vista Home / Grid -->
+        <div id="view-home" class="view active">
+          <div class="header-bar">
+            <h1>POKÉDEX</h1>
+            <span class="gen-badge">GEN 1 · 151</span>
+          </div>
+          
+          <div class="search-box">
+            <input type="text" id="search-input" placeholder="Nº o nombre..." autocomplete="off" />
+            <button id="search-btn">🔍</button>
+          </div>
+          <div id="error-msg" class="error-msg hidden"></div>
+
+          <div class="nav-tabs">
+            <button class="tab active" data-view="home">Lista</button>
+            <button class="tab" data-view="detail">Detalle</button>
+            <button class="tab" data-view="quiz">¿Quién es?</button>
+            <button class="tab" data-view="ai">Prof. Dex</button>
+          </div>
+
+          <div id="pokemon-grid" class="pokemon-grid">
+            <!-- Se llena dinámicamente -->
+            <div class="loading">Cargando Pokémon...</div>
+          </div>
+        </div>
+
+        <!-- Vista Detalle -->
+        <div id="view-detail" class="view">
+          <button class="back-btn" id="back-to-list">← Volver</button>
+          <div id="detail-content" class="detail-content">
+            <div class="loading">Selecciona un Pokémon</div>
+          </div>
+        </div>
+
+        <!-- Vista Quiz (Sombras) -->
+        <div id="view-quiz" class="view">
+          <div class="quiz-container">
+            <h2 class="quiz-title">¿Quién es ese Pokémon?</h2>
+            <div class="silhouette-box">
+              <img id="quiz-silhouette" src="" alt="Sombra" class="silhouette" />
+            </div>
+            <div class="quiz-form">
+              <input type="text" id="quiz-guess" placeholder="Escribe el nombre..." autocomplete="off" />
+              <button id="quiz-submit">¡Adivinar!</button>
+            </div>
+            <div id="quiz-result" class="quiz-result hidden"></div>
+            <div class="quiz-controls">
+              <button id="quiz-next">Siguiente →</button>
+              <button id="quiz-reveal">Revelar</button>
+            </div>
+            <div class="quiz-score">
+              Aciertos: <span id="score-correct">0</span> · 
+              Fallos: <span id="score-wrong">0</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-ai" class="view">
+          <h2 class="quiz-title">Profesor Dex</h2>
+          <p class="ai-intro">IA local de Kanto. No necesita .env ni internet extra.</p>
+          <div id="ai-log" class="ai-log"></div>
+          <div class="quiz-form">
+            <input type="text" id="ai-question" placeholder="Pregunta: tipos, nº, combate…" autocomplete="off" />
+            <button id="ai-send">Preguntar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTROLES INFERIORES -->
+    <div class="controls">
+      <div class="dpad">
+        <div class="dpad-up"></div>
+        <div class="dpad-left"></div>
+        <div class="dpad-center"></div>
+        <div class="dpad-right"></div>
+        <div class="dpad-down"></div>
+      </div>
+      <div class="action-buttons">
+        <button class="btn-a" id="btn-sound" title="Reproducir grito">🔊</button>
+        <button class="btn-b" id="btn-random" title="Pokémon aleatorio">🎲</button>
+      </div>
+    </div>
+
+    <div class="speaker-grill">
+      <span></span><span></span><span></span><span></span>
+    </div>
+  </div>
+
+  <audio id="cry-audio" preload="none"></audio>
+
+  <script src="app.js"></script>
+</body>
+</html>
