@@ -459,9 +459,9 @@ test("rejects hosts that are not plain slugs", () => {
   assert.equal(appNameFromHost('"><img src=x onerror=1>.grok.me'), "Grok App");
 });
 
-test("renders install page markup", () => {
+test("renders install page markup with the app name", () => {
   const html = renderInstallPage("wild-race.grok.me", "/?install=1&platform=ios");
-  assert.match(html, /Add Wild Race to your/);
+  assert.match(html, /Add Pokédex Kanto to your/);
   assert.match(html, /\/__grok\/install\/styles\.css/);
   assert.match(html, /href="\/"/);
   assert.equal(html.includes("{{APP_NAME}}"), false);
@@ -473,11 +473,12 @@ test("escapes host-derived values in the install page", () => {
   assert.equal(html.includes("<script>alert(1)</script>"), false);
 });
 
-test("renders the manifest with the per-app name", () => {
+test("renders the manifest with the app name and icon", () => {
   const manifest = JSON.parse(renderWebManifest("wild-race.grok.me"));
-  assert.equal(manifest.name, "Wild Race");
-  assert.equal(manifest.short_name, "Wild Race");
-  assert.equal(manifest.icons[0].src, "/__grok/icon-180.png");
+  assert.equal(manifest.name, "Pokédex Kanto");
+  assert.equal(manifest.short_name, "Pokédex Kanto");
+  assert.equal(manifest.icons[0].src, "/favicon.svg");
+  assert.equal(manifest.icons[0].type, "image/svg+xml");
 });
 
 // Tripwires: the deployed-app path only works if Nitro scans server/ — an
