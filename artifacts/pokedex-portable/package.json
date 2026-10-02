@@ -1,14 +1,13 @@
 {
-  "name": "pokedex-kanto-portable",
-  "version": "1.1.0",
-  "description": "Pokédex Gen 1 portable con IA local (sin .env)",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
+  "name": "pokedex-kanto-completo",
+  "private": true,
+  "type": "module",
+  "overrides": {
+    "@tanstack/react-start": "1.168.60"
   },
-  "dependencies": {
-    "axios": "^1.7.9",
-    "cors": "^2.8.5",
-    "express": "^4.21.2"
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "start": "vite preview"
   }
 }
