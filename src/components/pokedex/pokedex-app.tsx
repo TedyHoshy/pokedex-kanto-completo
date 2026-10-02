@@ -422,7 +422,7 @@ function ListView(props: {
   cursor: number;
 }) {
   return (
-    <div>
+    <div className="dex-list-view">
       <div className="mb-3 flex items-end justify-between border-b-2 border-pk-muted pb-2">
         <h1 className="font-display text-[11px] leading-relaxed text-pk-ink">POKEDEX</h1>
         <span className="rounded-sm bg-pk-ink px-2 py-1 font-body text-sm text-pk-screen">GEN 1 · 151</span>
@@ -573,7 +573,7 @@ function ListView(props: {
             <div
               key={p.id}
               className={cn(
-                "relative rounded-md border-2 bg-pk-panel p-1.5 text-center transition-transform duration-150 hover:scale-105",
+                "dex-pokemon-tile relative rounded-md border-2 bg-pk-panel p-1.5 text-center transition-transform duration-150 hover:scale-105",
                 i === props.cursor ? "border-pk-ink" : "border-pk-muted",
               )}
             >
@@ -1075,7 +1075,7 @@ function CompareView({
   const statNames = a?.stats.map((s) => s.name) ?? [];
 
   return (
-    <div>
+    <div className="dex-compare-view">
       <h2 className="mb-2 font-display text-[10px] leading-relaxed">
         Comparar
       </h2>
@@ -1356,11 +1356,11 @@ function QuizView({
   const hintText = hint ? hint.replace(/^Pista\s*:\s*/i, "") : "";
 
   return (
-    <div>
+    <div className="dex-quiz-view">
       <h2 className="mb-3 text-center font-display text-[11px] leading-relaxed">
         ¿Quién es ese Pokémon?
       </h2>
-      <div className="quiz-stage mx-auto mb-4 flex size-44 items-center justify-center rounded-lg border-4 border-pk-muted">
+      <div className="quiz-stage quiz-portrait mx-auto mb-4 flex size-44 items-center justify-center rounded-lg border-4 border-pk-muted">
         {p ? (
           <img
             src={p.sprite}
@@ -1475,7 +1475,7 @@ function QuizView({
           Ver ficha
         </button>
       )}
-      <p className="text-center font-body text-lg text-pk-muted">
+      <p className="quiz-score text-center font-body text-lg text-pk-muted">
         Aciertos {score.ok} · Fallos {score.bad}
       </p>
     </div>
@@ -1484,7 +1484,7 @@ function QuizView({
 
 function BootScreen({ onPower }: { onPower: () => void }) {
   return (
-    <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
+    <div className="dex-boot-screen flex min-h-[280px] flex-col items-center justify-center text-center">
       <p className="font-display text-[11px] leading-relaxed">Pokémon</p>
       <p className="font-display text-[11px] leading-relaxed">Rojo y Verde</p>
       <p className="mt-3 font-body text-xl text-pk-muted">Kanto · 151</p>
@@ -1511,7 +1511,8 @@ function GameView({
   muted: boolean;
   onMenu: () => void;
 }) {
-  const [encounterId, setEncounterId] = useState<number>(1);
+  const [encounterId, setEncounterId] = useState<number>(16);
+  const [encounterLevel, setEncounterLevel] = useState(5);
   const [playerId, setPlayerId] = useState(1);
   const [partyInitialized, setPartyInitialized] = useState(false);
   const [battleAnimation, setBattleAnimation] = useState<BattleAnimation>("idle");
@@ -1539,7 +1540,6 @@ function GameView({
   const playerLevel = playerProgress.level;
   const playerXp = playerProgress.xp;
   const playerMaxHp = 40 + (playerLevel - 1) * 5;
-  const encounterLevel = encounter.id % 20 || 10;
   const caughtPokemon = CATALOG.filter((pokemon) => log.isCaught(pokemon.id));
   const teamPokemon = [
     player,
@@ -1613,9 +1613,12 @@ function GameView({
   }, [playerQuery.data, playerLevel]);
 
   function spawnRandomEncounter() {
-    const next = CATALOG[Math.floor(Math.random() * CATALOG.length)];
+    const encounters = CATALOG.filter((pokemon) => pokemon.id !== playerId);
+    const next = encounters[Math.floor(Math.random() * encounters.length)];
+    const nextLevel = Math.max(1, playerLevel + Math.floor(Math.random() * 5) - 2);
     const nextHp = 26 + (next.id % 12) * 3;
     setEncounterId(next.id);
+    setEncounterLevel(nextLevel);
     setEnemyHp(nextHp);
     setEnemyMaxHp(nextHp);
     setEnemyAttackStage(0);
@@ -2210,7 +2213,7 @@ function AiView({
   ];
 
   return (
-    <div>
+    <div className="dex-professor-view">
       <h2 className="mb-2 flex items-center gap-2 font-display text-[10px] leading-relaxed">
         <Bot className="size-4" />
         Profesor Dex
