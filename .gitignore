@@ -7,3 +7,5 @@ dist/
 !.env.example
 Thumbs.db
 Desktop.ini
+.vercel
+.env*
