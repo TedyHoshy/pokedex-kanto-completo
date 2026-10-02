@@ -41,6 +41,7 @@ import {
 } from "@/lib/pokemon/sfx";
 import { speakDex, stopSpeak, warmupVoices } from "@/lib/pokemon/voice";
 import type { EvolutionNode, PokemonDetail, QuizPokemon } from "@/lib/pokemon/types";
+import { getLocalQuiz, getOfflinePokemon, saveOfflinePokemon } from "@/lib/pokemon/offline";
 import { cn, padDex, titleCase } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -56,6 +57,25 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 type Tab = "list" | "detail" | "quiz" | "ai" | "compare" | "game";
 
 const PARTY_LIMIT = 6;
+const OFFLINE_MODE_KEY = "pokedex-kanto:offline-mode";
+
+async function loadPokemonForMode(id: number, offlineMode: boolean) {
+  const local = getOfflinePokemon(id);
+  if (offlineMode) {
+    if (local) return local;
+    throw new Error("Este Pokémon no está en el catálogo local.");
+  }
+
+  try {
+    const result = await getPokemonFn({ data: { q: String(id) } });
+    if (!result.ok) throw new Error(result.error);
+    saveOfflinePokemon(result.data);
+    return result.data;
+  } catch (error) {
+    if (local) return local;
+    throw error;
+  }
+}
 
 const STAT_LABEL: Record<string, string> = {
   hp: "PS",
@@ -90,6 +110,8 @@ const TYPE_ACCENTS: Record<string, { from: string; to: string; glow: string }> =
 export function PokedexApp() {
   const [powered, setPowered] = useState(false);
   const [muted, setMutedUi] = useState(false);
+  const [online, setOnline] = useState(true);
+  const [offlineMode, setOfflineMode] = useState(false);
   const [tab, setTab] = useState<Tab>("list");
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -104,11 +126,42 @@ export function PokedexApp() {
   const fav = useFavorites();
   const log = useDexLog();
   const searchRef = useRef<HTMLInputElement>(null);
+  const screenScrollRef = useRef<HTMLDivElement>(null);
+  const localOnly = offlineMode || !online;
 
   useEffect(() => {
     setMutedUi(loadMutePref());
     warmupVoices();
+    const syncConnection = () => setOnline(navigator.onLine);
+    syncConnection();
+    window.addEventListener("online", syncConnection);
+    window.addEventListener("offline", syncConnection);
+    try {
+      setOfflineMode(window.localStorage.getItem(OFFLINE_MODE_KEY) === "true");
+    } catch {
+      setOfflineMode(false);
+    }
+    if (import.meta.env.PROD && "serviceWorker" in navigator) {
+      void navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+    return () => {
+      window.removeEventListener("online", syncConnection);
+      window.removeEventListener("offline", syncConnection);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const syncWorkerMode = () => {
+      navigator.serviceWorker.controller?.postMessage({
+        type: "pokedex-offline-mode",
+        enabled: localOnly,
+      });
+    };
+    syncWorkerMode();
+    navigator.serviceWorker.addEventListener("controllerchange", syncWorkerMode);
+    return () => navigator.serviceWorker.removeEventListener("controllerchange", syncWorkerMode);
+  }, [localOnly]);
 
   const suggestions = useMemo(() => suggestCatalog(query), [query]);
 
@@ -126,6 +179,10 @@ export function PokedexApp() {
   useEffect(() => {
     setCursor(0);
   }, [typeFilter, onlyFavs, statusFilter]);
+
+  useEffect(() => {
+    if (screenScrollRef.current) screenScrollRef.current.scrollTop = 0;
+  }, [tab, powered]);
 
   const listViewMode = tab === "list";
   const lcdSelectedId = listViewMode ? null : selectedId;
@@ -181,6 +238,10 @@ export function PokedexApp() {
       openPokemon(hit.id);
       return;
     }
+    if (localOnly) {
+      setError("Sin conexión, solo puedes buscar en los 151 Pokémon de Kanto.");
+      return;
+    }
     setTab("detail");
     setSelectedId(null);
     void lookupUnknown(q);
@@ -210,6 +271,17 @@ export function PokedexApp() {
     const next = !isMuted();
     setMuted(next);
     setMutedUi(next);
+  }
+
+  function toggleOfflineMode() {
+    const next = !offlineMode;
+    setOfflineMode(next);
+    try {
+      window.localStorage.setItem(OFFLINE_MODE_KEY, String(next));
+    } catch {
+      // The current session can still use local data without persisting the preference.
+    }
+    playClick();
   }
 
   function stepDex(delta: number) {
@@ -257,7 +329,7 @@ export function PokedexApp() {
 
   return (
     <div className="dex-stage">
-      <div className="w-full max-w-[920px]">
+      <div className="w-full max-w-230">
         <div className="dex-unit">
           <section className="dex-panel dex-left">
             <div className="dex-left-head">
@@ -281,7 +353,7 @@ export function PokedexApp() {
                 <span className="dex-bezel-dot" />
               </div>
               <div className="dex-bezel-inner">
-                <div className="dex-screen dex-screen-scroll screen-in p-3 text-pk-ink">
+                <div ref={screenScrollRef} className="dex-screen dex-screen-scroll screen-in p-3 text-pk-ink">
                   {!powered ? (
                     <BootScreen onPower={powerOn} />
                   ) : (
@@ -317,11 +389,12 @@ export function PokedexApp() {
                           onCompare={(id) => openCompare(id)}
                           fav={fav}
                           log={log}
+                          offlineMode={localOnly}
                         />
                       )}
-                      {tab === "quiz" && <QuizView onOpen={openPokemon} />}
-                      {tab === "game" && <GameView log={log} muted={muted} onMenu={() => goTab("list")} />}
-                      {tab === "ai" && <AiView selectedId={selectedId} />}
+                      {tab === "quiz" && <QuizView onOpen={openPokemon} offlineMode={localOnly} />}
+                      {tab === "game" && <GameView log={log} muted={muted} offlineMode={localOnly} onMenu={() => goTab("list")} />}
+                      {tab === "ai" && <AiView selectedId={selectedId} offlineMode={localOnly} />}
                       {tab === "compare" && (
                         <CompareView
                           leftId={vsLeft}
@@ -329,6 +402,7 @@ export function PokedexApp() {
                           setLeftId={setVsLeft}
                           setRightId={setVsRight}
                           onOpen={openPokemon}
+                          offlineMode={localOnly}
                         />
                       )}
                     </>
@@ -361,13 +435,17 @@ export function PokedexApp() {
               <span>{powered ? (lcdSelectedId ? `Nº ${padDex(lcdSelectedId)}` : "KANTO · 151") : "OFF"}</span>
               <span>{powered ? lcdName || (listViewMode ? "Índice" : tabLabel(tab)) : "Pulsa el botón verde"}</span>
             </div>
+            <div className={cn("dex-connection-indicator", localOnly && "is-local")} aria-live="polite">
+              <span className="dex-connection-dot" aria-hidden="true" />
+              {localOnly ? (online ? "MODO LOCAL" : "SIN RED · LOCAL") : "EN LÍNEA"}
+            </div>
             <div className="dex-blue-pad">
               {([["list", "LISTA"], ["detail", "FICHA"], ["quiz", "SOMBRA"], ["game", "BATALLA"]] as const).map(([id, label]) => (
                 <button key={id} type="button" className={cn("btn-press", tab === id && powered && "is-on")} onClick={() => !powered ? powerOn() : goTab(id)}>
                   {label}
                 </button>
               ))}
-              <button type="button" className="btn-press" disabled={tab === "list" || !selectedId} onClick={() => selectedId && playCry(`https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${selectedId}.ogg`)}>GRITO</button>
+              <button type="button" className="btn-press" disabled={tab === "list" || !selectedId || localOnly} onClick={() => selectedId && playCry(`https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${selectedId}.ogg`)}>GRITO</button>
               <button type="button" className="btn-press" onClick={() => selectedId && fav.toggle(selectedId)}>FAV</button>
               <button type="button" className="btn-press" onClick={() => !powered ? powerOn() : openPokemon(Math.floor(Math.random() * MAX_DEX) + 1)}>DADO</button>
               <button type="button" className="btn-press" onClick={toggleMute}>{muted ? "MUTE" : "SONIDO"}</button>
@@ -382,6 +460,7 @@ export function PokedexApp() {
             <div className="dex-black-row">
               <button type="button" className="dex-black-key btn-press" onClick={() => !powered ? powerOn() : openCompare(selectedId ?? visible[cursor]?.id ?? 1)}>VS</button>
               <button type="button" className="dex-black-key btn-press" onClick={() => !powered ? powerOn() : goTab("ai")}>PROF. DEX</button>
+              <button type="button" className="dex-black-key dex-offline-key btn-press" aria-pressed={offlineMode} onClick={toggleOfflineMode}>{offlineMode ? "USAR RED" : "MODO LOCAL"}</button>
             </div>
           </section>
         </div>
@@ -635,6 +714,7 @@ function DetailView({
   onCompare,
   fav,
   log,
+  offlineMode,
 }: {
   selectedId: number | null;
   onBack: () => void;
@@ -642,14 +722,11 @@ function DetailView({
   onCompare: (id: number) => void;
   fav: ReturnType<typeof useFavorites>;
   log: ReturnType<typeof useDexLog>;
+  offlineMode: boolean;
 }) {
   const q = useQuery({
-    queryKey: ["pokemon", selectedId],
-    queryFn: async () => {
-      const res = await getPokemonFn({ data: { q: String(selectedId) } });
-      if (!res.ok) throw new Error(res.error);
-      return res.data;
-    },
+    queryKey: ["pokemon", selectedId, offlineMode ? "local" : "network"],
+    queryFn: () => loadPokemonForMode(selectedId ?? 0, offlineMode),
     enabled: selectedId != null,
   });
 
@@ -687,6 +764,7 @@ function DetailView({
           onCatch={() => log.toggleCaught(q.data.id)}
           onOpen={onOpen}
           onCompare={() => onCompare(q.data.id)}
+          offlineMode={offlineMode}
         />
       )}
     </div>
@@ -701,6 +779,7 @@ function PokemonSheet({
   onCatch,
   onOpen,
   onCompare,
+  offlineMode,
 }: {
   p: PokemonDetail;
   isFav: boolean;
@@ -709,6 +788,7 @@ function PokemonSheet({
   onCatch: () => void;
   onOpen: (id: number) => void;
   onCompare: () => void;
+  offlineMode: boolean;
 }) {
   const special = p.abilities.find((a) => !a.hidden) ?? p.abilities[0];
   const [mode, setMode] = useState<"anim" | "art" | "3d">("anim");
@@ -735,7 +815,7 @@ function PokemonSheet({
 
   useEffect(() => {
     playDexOpen();
-    playCry(p.cry);
+    if (!offlineMode) playCry(p.cry);
     speakDex(
       `Pokémon número ${p.id}. ${p.nameEs}. Tipo ${typeLabel}.`,
     );
@@ -743,9 +823,13 @@ function PokemonSheet({
     return () => {
       stopSpeak();
     };
-  }, [p.id, p.cry, p.nameEs, typeLabel]);
+  }, [p.id, p.cry, p.nameEs, typeLabel, offlineMode]);
 
   async function analyze() {
+    if (offlineMode) {
+      setAiNote("El análisis IA requiere conexión.");
+      return;
+    }
     setAiBusy(true);
     const res = await askDexFn({
       data: {
@@ -785,6 +869,9 @@ function PokemonSheet({
                   src={img}
                   alt={isShiny ? `${p.nameEs} shiny` : p.nameEs}
                   className="dex-3d-clean-image h-40 w-40 object-contain"
+                  onError={(event) => {
+                    if (event.currentTarget.src !== spriteUrl(p.id)) event.currentTarget.src = spriteUrl(p.id);
+                  }}
                 />
               </div>
             ) : (
@@ -796,6 +883,9 @@ function PokemonSheet({
                     ? "sprite-idle h-38 w-38 object-contain pixelated"
                     : "sprite-idle h-48 w-48 object-contain",
                 )}
+                onError={(event) => {
+                  if (event.currentTarget.src !== spriteUrl(p.id)) event.currentTarget.src = spriteUrl(p.id);
+                }}
               />
             )}
           </div>
@@ -861,7 +951,7 @@ function PokemonSheet({
         <button
           type="button"
           onClick={() => {
-            playCry(p.cry);
+            if (!offlineMode) playCry(p.cry);
             speakDex(`${p.nameEs}. Tipo ${typeLabel}. ${p.description}`);
           }}
           className="btn-press inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-md bg-pk-red font-body text-lg text-pk-paper"
@@ -904,7 +994,7 @@ function PokemonSheet({
       <button
         type="button"
         onClick={() => void analyze()}
-        disabled={aiBusy}
+        disabled={aiBusy || offlineMode}
         className="btn-press inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-pk-ink font-body text-lg text-pk-screen disabled:opacity-60"
       >
         <Bot className="size-4" />
@@ -937,8 +1027,8 @@ function PokemonSheet({
       )}
 
       <div className="grid grid-cols-2 gap-2">
-        <InfoCell label="Altura" value={`${p.height} m`} />
-        <InfoCell label="Peso" value={`${p.weight} kg`} />
+        <InfoCell label="Altura" value={p.height == null ? "—" : `${p.height} m`} />
+        <InfoCell label="Peso" value={p.weight == null ? "—" : `${p.weight} kg`} />
         <InfoCell label="Captura" value={String(p.captureRate ?? "—")} />
         <InfoCell
           label="Hábitat"
@@ -1035,30 +1125,24 @@ function CompareView({
   setLeftId,
   setRightId,
   onOpen,
+  offlineMode,
 }: {
   leftId: number | null;
   rightId: number | null;
   setLeftId: (id: number) => void;
   setRightId: (id: number) => void;
   onOpen: (id: number) => void;
+  offlineMode: boolean;
 }) {
   const [pick, setPick] = useState("");
   const leftQ = useQuery({
-    queryKey: ["pokemon", leftId],
-    queryFn: async () => {
-      const res = await getPokemonFn({ data: { q: String(leftId) } });
-      if (!res.ok) throw new Error(res.error);
-      return res.data;
-    },
+    queryKey: ["pokemon", leftId, offlineMode ? "local" : "network"],
+    queryFn: () => loadPokemonForMode(leftId ?? 0, offlineMode),
     enabled: leftId != null,
   });
   const rightQ = useQuery({
-    queryKey: ["pokemon", rightId],
-    queryFn: async () => {
-      const res = await getPokemonFn({ data: { q: String(rightId) } });
-      if (!res.ok) throw new Error(res.error);
-      return res.data;
-    },
+    queryKey: ["pokemon", rightId, offlineMode ? "local" : "network"],
+    queryFn: () => loadPokemonForMode(rightId ?? 0, offlineMode),
     enabled: rightId != null,
   });
 
@@ -1265,8 +1349,10 @@ function EvolutionRow({
 
 function QuizView({
   onOpen,
+  offlineMode,
 }: {
   onOpen: (id: number) => void;
+  offlineMode: boolean;
 }) {
   const [guess, setGuess] = useState("");
   const [revealed, setRevealed] = useState(false);
@@ -1277,8 +1363,15 @@ function QuizView({
   const [hintBusy, setHintBusy] = useState(false);
 
   const q = useQuery({
-    queryKey: ["quiz", seed],
-    queryFn: () => getQuizFn(),
+    queryKey: ["quiz", seed, offlineMode],
+    queryFn: async () => {
+      if (offlineMode) return getLocalQuiz();
+      try {
+        return await getQuizFn();
+      } catch {
+        return getLocalQuiz();
+      }
+    },
   });
 
   useEffect(() => {
@@ -1324,9 +1417,11 @@ function QuizView({
     );
     if (hit) {
       playCorrectSfx();
-      playCry(
-        `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${p.id}.ogg`,
-      );
+      if (!offlineMode) {
+        playCry(
+          `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${p.id}.ogg`,
+        );
+      }
       speakDex(`¡Correcto! Es ${p.nameEs}.`);
     } else {
       playWrongSfx();
@@ -1454,9 +1549,11 @@ function QuizView({
             setResult(null);
             stopLoop();
             if (p) {
-              playCry(
-                `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${p.id}.ogg`,
-              );
+              if (!offlineMode) {
+                playCry(
+                  `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${p.id}.ogg`,
+                );
+              }
               speakDex(`Es ${p.nameEs}.`);
             }
           }}
@@ -1484,7 +1581,7 @@ function QuizView({
 
 function BootScreen({ onPower }: { onPower: () => void }) {
   return (
-    <div className="dex-boot-screen flex min-h-[280px] flex-col items-center justify-center text-center">
+    <div className="dex-boot-screen flex min-h-70 flex-col items-center justify-center text-center">
       <p className="font-display text-[11px] leading-relaxed">Pokémon</p>
       <p className="font-display text-[11px] leading-relaxed">Rojo y Verde</p>
       <p className="mt-3 font-body text-xl text-pk-muted">Kanto · 151</p>
@@ -1505,10 +1602,12 @@ function BootScreen({ onPower }: { onPower: () => void }) {
 function GameView({
   log,
   muted,
+  offlineMode,
   onMenu,
 }: {
   log: ReturnType<typeof useDexLog>;
   muted: boolean;
+  offlineMode: boolean;
   onMenu: () => void;
 }) {
   const [encounterId, setEncounterId] = useState<number>(16);
@@ -1559,17 +1658,15 @@ function GameView({
 
   useEffect(() => {
     if (!partyInitialized) return;
-    playCry(`https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${playerId}.ogg`);
+    if (!offlineMode) {
+      playCry(`https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${playerId}.ogg`);
+    }
     return stopCry;
-  }, [partyInitialized, playerId]);
+  }, [offlineMode, partyInitialized, playerId]);
 
   const playerQuery = useQuery({
-    queryKey: ["pokemon", "battle-player", playerId],
-    queryFn: async () => {
-      const res = await getPokemonFn({ data: { q: String(playerId) } });
-      if (!res.ok) throw new Error(res.error);
-      return res.data;
-    },
+    queryKey: ["pokemon", "battle-player", playerId, offlineMode],
+    queryFn: () => loadPokemonForMode(playerId, offlineMode),
   });
   const enemyRatio = Math.max(0, Math.min(100, (enemyHp / enemyMaxHp) * 100));
   const playerRatio = Math.max(0, Math.min(100, (playerHp / playerMaxHp) * 100));
@@ -2160,20 +2257,18 @@ function formatMoveName(move: string) {
 
 function AiView({
   selectedId,
+  offlineMode,
 }: {
   selectedId: number | null;
+  offlineMode: boolean;
 }) {
   const [question, setQuestion] = useState("");
   const [log, setLog] = useState<{ role: "user" | "dex"; text: string }[]>([]);
   const [busy, setBusy] = useState(false);
 
   const q = useQuery({
-    queryKey: ["pokemon", selectedId],
-    queryFn: async () => {
-      const res = await getPokemonFn({ data: { q: String(selectedId) } });
-      if (!res.ok) throw new Error(res.error);
-      return res.data;
-    },
+    queryKey: ["pokemon", selectedId, offlineMode ? "local" : "network"],
+    queryFn: () => loadPokemonForMode(selectedId ?? 0, offlineMode),
     enabled: selectedId != null,
   });
 
@@ -2182,6 +2277,10 @@ function AiView({
     if (!prompt || busy) return;
     setQuestion("");
     setLog((prev) => [...prev, { role: "user", text: prompt }]);
+    if (offlineMode) {
+      setLog((prev) => [...prev, { role: "dex", text: "El Profesor Dex necesita conexión. El catálogo, las fichas guardadas y los juegos locales siguen disponibles." }]);
+      return;
+    }
     setBusy(true);
     const p = q.data;
     const res = await askDexFn({
@@ -2222,13 +2321,19 @@ function AiView({
         IA de Kanto
         {q.data ? ` · ficha de ${q.data.nameEs}` : " · abre una ficha para más contexto"}
       </p>
+      {offlineMode && (
+        <p className="mb-2 rounded-md border-2 border-pk-muted bg-pk-panel px-3 py-2 font-body text-lg">
+          El Profesor Dex requiere conexión. El resto del catálogo sigue disponible.
+        </p>
+      )}
       <div className="mb-2 flex flex-wrap gap-1">
         {chips.map((c) => (
           <button
             key={c}
             type="button"
+            disabled={offlineMode}
             onClick={() => void send(c)}
-            className="btn-press rounded-full bg-pk-panel px-3 py-1 font-body text-base"
+            className="btn-press rounded-full bg-pk-panel px-3 py-1 font-body text-base disabled:opacity-50"
           >
             {c}
           </button>
@@ -2265,11 +2370,12 @@ function AiView({
             if (e.key === "Enter") void send(question);
           }}
           placeholder="Pregunta a la IA…"
-          className="h-11 flex-1 rounded-md border-2 border-pk-muted bg-pk-panel px-3 font-body text-lg outline-none"
+          disabled={offlineMode}
+          className="h-11 flex-1 rounded-md border-2 border-pk-muted bg-pk-panel px-3 font-body text-lg outline-none disabled:opacity-50"
         />
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || offlineMode}
           onClick={() => void send(question)}
           className="btn-press h-11 rounded-md bg-pk-ink px-3 font-body text-lg text-pk-screen disabled:opacity-50"
         >

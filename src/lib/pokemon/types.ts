@@ -23,8 +23,8 @@ export type PokemonDetail = {
   name: string;
   nameEs: string;
   types: string[];
-  height: number;
-  weight: number;
+  height: number | null;
+  weight: number | null;
   baseExperience: number | null;
   captureRate: number | null;
   habitat: string | null;
