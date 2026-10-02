@@ -1,28 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
+
+import { usePersistentState } from "./storage";
 
 const KEY = "pokedex-gen1-log";
 
 type Log = { seen: number[]; caught: number[] };
 
-function read(): Log {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return { seen: [], caught: [] };
-    const parsed = JSON.parse(raw) as Partial<Log>;
-    const seen = Array.isArray(parsed.seen)
-      ? parsed.seen.filter((n): n is number => typeof n === "number")
-      : [];
-    const caught = Array.isArray(parsed.caught)
-      ? parsed.caught.filter((n): n is number => typeof n === "number")
-      : [];
-    return { seen, caught };
-  } catch {
-    return { seen: [], caught: [] };
-  }
-}
+const EMPTY_LOG: Log = { seen: [], caught: [] };
 
-function write(log: Log) {
-  localStorage.setItem(KEY, JSON.stringify(log));
+function parseLog(raw: string): Log {
+  const parsed = JSON.parse(raw) as Partial<Log>;
+  const seen = Array.isArray(parsed.seen)
+    ? parsed.seen.filter((n): n is number => typeof n === "number")
+    : [];
+  const caught = Array.isArray(parsed.caught)
+    ? parsed.caught.filter((n): n is number => typeof n === "number")
+    : [];
+
+  return { seen, caught };
 }
 
 function uniq(ids: number[]) {
@@ -30,32 +25,31 @@ function uniq(ids: number[]) {
 }
 
 export function useDexLog() {
-  const [log, setLog] = useState<Log>({ seen: [], caught: [] });
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  useEffect(() => {
-    setLog(read());
-    setIsLoaded(true);
-  }, []);
+  const [log, setLog] = usePersistentState<Log>(KEY, EMPTY_LOG, {
+    parse: (raw) => {
+      try {
+        return parseLog(raw);
+      } catch {
+        return EMPTY_LOG;
+      }
+    },
+    serialize: JSON.stringify,
+  });
 
   const markSeen = useCallback((id: number) => {
     setLog((prev) => {
       if (prev.seen.includes(id)) return prev;
-      const next = { ...prev, seen: uniq([...prev.seen, id]) };
-      write(next);
-      return next;
+      return { ...prev, seen: uniq([...prev.seen, id]) };
     });
-  }, []);
+  }, [setLog]);
 
   /** Marca todos los Pokémon de la Pokédex (1–151) como vistos. */
   const revealAll = useCallback(() => {
     setLog((prev) => {
       const allIds = Array.from({ length: 151 }, (_, i) => i + 1);
-      const next = { ...prev, seen: uniq([...prev.seen, ...allIds]) };
-      write(next);
-      return next;
+      return { ...prev, seen: uniq([...prev.seen, ...allIds]) };
     });
-  }, []);
+  }, [setLog]);
 
   const toggleCaught = useCallback((id: number) => {
     setLog((prev) => {
@@ -64,11 +58,9 @@ export function useDexLog() {
         ? prev.caught.filter((x) => x !== id)
         : uniq([...prev.caught, id]);
       const seen = has ? prev.seen : uniq([...prev.seen, id]);
-      const next = { seen, caught };
-      write(next);
-      return next;
+      return { seen, caught };
     });
-  }, []);
+  }, [setLog]);
 
   const isSeen = useCallback((id: number) => log.seen.includes(id), [log.seen]);
   const isCaught = useCallback(
@@ -77,7 +69,7 @@ export function useDexLog() {
   );
 
   return {
-    isLoaded,
+    isLoaded: true,
     seenCount: log.seen.length,
     caughtCount: log.caught.length,
     markSeen,

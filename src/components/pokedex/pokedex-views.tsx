@@ -44,7 +44,6 @@ import type { EvolutionNode, PokemonDetail, QuizPokemon } from "@/lib/pokemon/ty
 import { getLocalQuiz, getOfflinePokemon, saveOfflinePokemon } from "@/lib/pokemon/offline";
 import { cn, padDex, titleCase } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
-import { loadPokemonForMode, PARTY_LIMIT, STAT_LABEL, TYPE_ACCENTS } from "@/components/pokedex/pokedex-shared";
 import {
   ArrowLeft,
   ChevronRight,
