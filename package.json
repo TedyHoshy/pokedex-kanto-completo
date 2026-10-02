@@ -7,7 +7,7 @@
     "nf3": "0.3.17",
     "@tanstack/react-start": "1.168.60"
   },
-"scripts": {
+  "scripts": {
     "dev": "node scripts/with-app-env.mjs vite dev --host 0.0.0.0 --port 8080",
     "build": "node scripts/with-app-env.mjs vite build && npm run db:migrate",
     "db:migrate": "node scripts/migrate.mjs",
@@ -94,7 +94,6 @@
     "prettier": "^3.4.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.56.1",
-    "vinxi": "^0.5.11",
     "vite": "^8.2.0"
   }
 }
