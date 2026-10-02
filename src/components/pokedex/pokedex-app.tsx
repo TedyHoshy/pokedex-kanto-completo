@@ -916,12 +916,12 @@ function PokemonSheet({
         </p>
       )}
 
-      <p className="rounded-md border-2 border-pk-muted bg-pk-panel px-3 py-2 font-body text-lg leading-snug">
+      <p className="pokemon-flavor-card">
         {p.description}
       </p>
 
       {special && (
-        <div className="rounded-md border-2 border-pk-muted bg-pk-panel px-3 py-2">
+        <div className="pokemon-ability-card">
           <p className="font-body text-sm uppercase tracking-wide text-pk-muted">
             Poder especial
           </p>
@@ -950,7 +950,7 @@ function PokemonSheet({
 
       <MatchupBlock types={p.types} />
 
-      <div>
+      <div className="pokemon-stats-panel">
         <h3 className="mb-1 font-body text-lg text-pk-muted">Estadísticas</h3>
         {p.stats.map((s) => (
           <div key={s.name} className="mb-1 flex items-center gap-2">
@@ -1008,7 +1008,7 @@ function MatchupBlock({ types }: { types: string[] }) {
     { title: "Inmune", items: m.immune },
   ];
   return (
-    <div>
+    <div className="pokemon-matchup-shell">
       <h3 className="mb-1 font-body text-lg text-pk-muted">Tipos rivales</h3>
       {rows.map((row) =>
         row.items.length === 0 ? null : (
