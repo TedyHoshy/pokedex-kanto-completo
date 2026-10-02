@@ -1,4 +1,4 @@
-import { TypeBadge } from "@/components/pokedex/type-badge";
+﻿import { TypeBadge } from "@/components/pokedex/type-badge";
 import {
   CATALOG,
   FILTER_TYPES,
@@ -44,6 +44,7 @@ import type { EvolutionNode, PokemonDetail, QuizPokemon } from "@/lib/pokemon/ty
 import { getLocalQuiz, getOfflinePokemon, saveOfflinePokemon } from "@/lib/pokemon/offline";
 import { cn, padDex, titleCase } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
+import { loadPokemonForMode, PARTY_LIMIT, STAT_LABEL, TYPE_ACCENTS } from "@/components/pokedex/pokedex-shared";
 import {
   ArrowLeft,
   ChevronRight,
@@ -52,390 +53,7 @@ import {
   Star,
   Volume2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { loadPokemonForMode, PARTY_LIMIT, STAT_LABEL, TYPE_ACCENTS } from "./pokedex-shared";
-
-type Tab = "list" | "detail" | "quiz" | "ai" | "compare" | "game";
-
-const OFFLINE_MODE_KEY = "pokedex-kanto:offline-mode";
-
-export function PokedexApp() {
-  const [powered, setPowered] = useState(false);
-  const [muted, setMutedUi] = useState(false);
-  const [online, setOnline] = useState(true);
-  const [offlineMode, setOfflineMode] = useState(false);
-  const [tab, setTab] = useState<Tab>("list");
-  const [query, setQuery] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(1);
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
-  const [onlyFavs, setOnlyFavs] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [suggestOpen, setSuggestOpen] = useState(false);
-  const [cursor, setCursor] = useState(0);
-  const [vsLeft, setVsLeft] = useState<number | null>(null);
-  const [vsRight, setVsRight] = useState<number | null>(null);
-  const fav = useFavorites();
-  const log = useDexLog();
-  const searchRef = useRef<HTMLInputElement>(null);
-  const screenScrollRef = useRef<HTMLDivElement>(null);
-  const localOnly = offlineMode || !online;
-
-  useEffect(() => {
-    setMutedUi(loadMutePref());
-    warmupVoices();
-    const syncConnection = () => setOnline(navigator.onLine);
-    syncConnection();
-    window.addEventListener("online", syncConnection);
-    window.addEventListener("offline", syncConnection);
-    try {
-      setOfflineMode(window.localStorage.getItem(OFFLINE_MODE_KEY) === "true");
-    } catch {
-      setOfflineMode(false);
-    }
-    if (import.meta.env.PROD && "serviceWorker" in navigator) {
-      void navigator.serviceWorker.register("/sw.js").catch(() => {});
-    }
-    return () => {
-      window.removeEventListener("online", syncConnection);
-      window.removeEventListener("offline", syncConnection);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!("serviceWorker" in navigator)) return;
-    const syncWorkerMode = () => {
-      navigator.serviceWorker.controller?.postMessage({
-        type: "pokedex-offline-mode",
-        enabled: localOnly,
-      });
-    };
-    syncWorkerMode();
-    navigator.serviceWorker.addEventListener("controllerchange", syncWorkerMode);
-    return () => navigator.serviceWorker.removeEventListener("controllerchange", syncWorkerMode);
-  }, [localOnly]);
-
-  const suggestions = useMemo(() => suggestCatalog(query), [query]);
-
-  const visible = useMemo(() => {
-    return CATALOG.filter((p) => {
-      if (onlyFavs && !fav.has(p.id)) return false;
-      if (typeFilter && !p.types.includes(typeFilter)) return false;
-      if (statusFilter === "seen" && !log.isSeen(p.id)) return false;
-      if (statusFilter === "caught" && !log.isCaught(p.id)) return false;
-      if (statusFilter === "missing" && log.isSeen(p.id)) return false;
-      return true;
-    });
-  }, [onlyFavs, typeFilter, statusFilter, fav, log]);
-
-  useEffect(() => {
-    setCursor(0);
-  }, [typeFilter, onlyFavs, statusFilter]);
-
-  useEffect(() => {
-    if (screenScrollRef.current) screenScrollRef.current.scrollTop = 0;
-  }, [tab, powered]);
-
-  const listViewMode = tab === "list";
-  const lcdSelectedId = listViewMode ? null : selectedId;
-  const lcdName =
-    lcdSelectedId != null
-      ? CATALOG.find((p) => p.id === lcdSelectedId)?.nameEs ?? ""
-      : "";
-
-  function openPokemon(id: number) {
-    stopCry();
-    setError(null);
-    setSelectedId(id);
-    log.markSeen(id);
-    setTab("detail");
-    setSuggestOpen(false);
-    playClick();
-  }
-
-  function openCompare(left: number, right?: number) {
-    stopCry();
-    log.markSeen(left);
-    setVsLeft(left);
-    setVsRight(right ?? null);
-    setSelectedId(left);
-    playClick();
-    stopLoop();
-    setTab("compare");
-  }
-
-  function goTab(next: Tab) {
-    stopCry();
-    playClick();
-    if (next !== "quiz") stopLoop();
-    setTab(next);
-  }
-
-  function runSearch(raw: string) {
-    const q = raw.trim();
-    if (!q) {
-      setError("Escribe un número (1–151) o un nombre.");
-      return;
-    }
-    if (/^\d+$/.test(q)) {
-      const n = Number(q);
-      if (n < 1 || n > MAX_DEX) {
-        setError(RANGE_ERROR);
-        return;
-      }
-    }
-    const hit = findInCatalog(q);
-    if (hit) {
-      setQuery(hit.nameEs);
-      openPokemon(hit.id);
-      return;
-    }
-    if (localOnly) {
-      setError("Sin conexión, solo puedes buscar en los 151 Pokémon de Kanto.");
-      return;
-    }
-    setTab("detail");
-    setSelectedId(null);
-    void lookupUnknown(q);
-  }
-
-  async function lookupUnknown(q: string) {
-    setError(null);
-    const res = await getPokemonFn({ data: { q } });
-    if (!res.ok) {
-      setError(res.error);
-      setTab("list");
-      return;
-    }
-    openPokemon(res.data.id);
-  }
-
-  function powerOn() {
-    void unlockAudio();
-    playBoot();
-    speakDex("Pokédex de Kanto lista. Ciento cincuenta y un Pokémon.");
-    log.revealAll();
-    setSelectedId((current) => current ?? 1);
-    setPowered(true);
-  }
-
-  function toggleMute() {
-    const next = !isMuted();
-    setMuted(next);
-    setMutedUi(next);
-  }
-
-  function toggleOfflineMode() {
-    const next = !offlineMode;
-    setOfflineMode(next);
-    try {
-      window.localStorage.setItem(OFFLINE_MODE_KEY, String(next));
-    } catch {
-      // The current session can still use local data without persisting the preference.
-    }
-    playClick();
-  }
-
-  function stepDex(delta: number) {
-    if (!powered) return;
-    const base = selectedId ?? visible[cursor]?.id ?? 1;
-    const next = Math.min(MAX_DEX, Math.max(1, base + delta));
-    openPokemon(next);
-  }
-
-  function movePad(dir: "up" | "down" | "left" | "right") {
-    if (!powered) return;
-    playClick();
-    if (tab !== "list") {
-      if (dir === "left") stepDex(-1);
-      if (dir === "right") stepDex(1);
-      if (dir === "up") setTab("list");
-      if (dir === "down") setTab("quiz");
-      return;
-    }
-    const cols = 3;
-    let i = cursor;
-    if (dir === "left") i -= 1;
-    if (dir === "right") i += 1;
-    if (dir === "up") i -= cols;
-    if (dir === "down") i += cols;
-    if (i >= 0 && i < visible.length) setCursor(i);
-  }
-
-  function confirmPad() {
-    playClick();
-    if (!powered) {
-      powerOn();
-      return;
-    }
-    if (tab === "list" && visible[cursor]) openPokemon(visible[cursor].id);
-    else setTab("list");
-  }
-
-  function powerOff() {
-    stopCry();
-    stopLoop();
-    stopSpeak();
-    setPowered(false);
-  }
-
-  return (
-    <div className="dex-stage">
-      <div className="w-full max-w-230">
-        <div className="dex-unit">
-          <section className="dex-panel dex-left">
-            <div className="dex-left-head">
-              <button
-                type="button"
-                className={cn("dex-lens", powered && "lens-pulse")}
-                aria-label={powered ? "Pokédex encendida" : "Encender"}
-                onClick={() => {
-                  if (!powered) powerOn();
-                }}
-              />
-              <div className="dex-leds" aria-hidden>
-                <span className="dex-led dex-led-r" />
-                <span className="dex-led dex-led-y" />
-                <span className="dex-led dex-led-g" />
-              </div>
-            </div>
-            <div className="dex-bezel">
-              <div className="dex-bezel-dots" aria-hidden>
-                <span className="dex-bezel-dot" />
-                <span className="dex-bezel-dot" />
-              </div>
-              <div className="dex-bezel-inner">
-                <div ref={screenScrollRef} className="dex-screen dex-screen-scroll screen-in p-3 text-pk-ink">
-                  {!powered ? (
-                    <BootScreen onPower={powerOn} />
-                  ) : (
-                    <>
-                      {tab === "list" && (
-                        <ListView
-                          query={query}
-                          setQuery={setQuery}
-                          error={error}
-                          suggestions={suggestions}
-                          suggestOpen={suggestOpen}
-                          setSuggestOpen={setSuggestOpen}
-                          searchRef={searchRef}
-                          onSearch={runSearch}
-                          onPick={openPokemon}
-                          typeFilter={typeFilter}
-                          setTypeFilter={setTypeFilter}
-                          onlyFavs={onlyFavs}
-                          setOnlyFavs={setOnlyFavs}
-                          statusFilter={statusFilter}
-                          setStatusFilter={setStatusFilter}
-                          visible={visible}
-                          fav={fav}
-                          log={log}
-                          cursor={cursor}
-                        />
-                      )}
-                      {tab === "detail" && (
-                        <DetailView
-                          selectedId={selectedId}
-                          onBack={() => setTab("list")}
-                          onOpen={openPokemon}
-                          onCompare={(id) => openCompare(id)}
-                          fav={fav}
-                          log={log}
-                          offlineMode={localOnly}
-                        />
-                      )}
-                      {tab === "quiz" && <QuizView onOpen={openPokemon} offlineMode={localOnly} />}
-                      {tab === "game" && <GameView log={log} muted={muted} offlineMode={localOnly} onMenu={() => goTab("list")} />}
-                      {tab === "ai" && <AiView selectedId={selectedId} offlineMode={localOnly} />}
-                      {tab === "compare" && (
-                        <CompareView
-                          leftId={vsLeft}
-                          rightId={vsRight}
-                          setLeftId={setVsLeft}
-                          setRightId={setVsRight}
-                          onOpen={openPokemon}
-                          offlineMode={localOnly}
-                        />
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="dex-left-foot">
-              <button
-                type="button"
-                className="dex-green btn-press"
-                aria-label="Confirmar"
-                onClick={confirmPad}
-              />
-              <div className="dex-dpad" aria-label="Cruz de dirección">
-                <span className="dex-dpad-arm dex-dpad-ud" />
-                <span className="dex-dpad-arm dex-dpad-lr" />
-                <button type="button" className="dex-dpad-btn up" aria-label="Arriba" onClick={() => movePad("up")} />
-                <button type="button" className="dex-dpad-btn down" aria-label="Abajo" onClick={() => movePad("down")} />
-                <button type="button" className="dex-dpad-btn left" aria-label="Izquierda" onClick={() => movePad("left")} />
-                <button type="button" className="dex-dpad-btn right" aria-label="Derecha" onClick={() => movePad("right")} />
-              </div>
-            </div>
-          </section>
-
-          <div className="dex-hinge" aria-hidden />
-
-          <section className="dex-panel dex-right">
-            <div className="dex-screen-shell">
-              <div className={cn("dex-connection-indicator", localOnly && "is-local")} aria-live="polite">
-                <span className="dex-connection-dot" aria-hidden="true" />
-                <span className="dex-connection-text">
-                  {localOnly ? (online ? "MODO LOCAL" : "SIN RED · LOCAL") : "EN LÍNEA"}
-                </span>
-              </div>
-              <div className="dex-lcd" aria-live="polite">
-                <span>{powered ? (lcdSelectedId ? `Nº ${padDex(lcdSelectedId)}` : "KANTO · 151") : "OFF"}</span>
-                <span>{powered ? lcdName || (listViewMode ? "Índice" : tabLabel(tab)) : "Pulsa el botón verde"}</span>
-              </div>
-            </div>
-            <div className="dex-blue-pad">
-              {([["list", "LISTA"], ["detail", "FICHA"], ["quiz", "SOMBRA"], ["game", "BATALLA"]] as const).map(([id, label]) => (
-                <button key={id} type="button" className={cn("btn-press", tab === id && powered && "is-on")} onClick={() => !powered ? powerOn() : goTab(id)}>
-                  {label}
-                </button>
-              ))}
-              <button type="button" className="btn-press" disabled={tab === "list" || !selectedId || localOnly} onClick={() => selectedId && playCry(`https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${selectedId}.ogg`)}>GRITO</button>
-              <button type="button" className="btn-press" onClick={() => selectedId && fav.toggle(selectedId)}>FAV</button>
-              <button type="button" className="btn-press" onClick={() => !powered ? powerOn() : openPokemon(Math.floor(Math.random() * MAX_DEX) + 1)}>DADO</button>
-              <button type="button" className="btn-press" onClick={toggleMute}>{muted ? "MUTE" : "SONIDO"}</button>
-            </div>
-            <div className="dex-right-mid">
-              <div className="dex-white-pair">
-                <button type="button" className="dex-white-key btn-press" aria-label="Anterior" onClick={() => stepDex(-1)}>Prev</button>
-                <button type="button" className="dex-white-key btn-press" aria-label="Siguiente" onClick={() => stepDex(1)}>Next</button>
-              </div>
-              <button type="button" className="dex-yellow btn-press" aria-label={powered ? "Apagar" : "Encender"} onClick={() => powered ? powerOff() : powerOn()} />
-            </div>
-            <div className="dex-black-row">
-              <button type="button" className="dex-black-key btn-press" onClick={() => !powered ? powerOn() : openCompare(selectedId ?? visible[cursor]?.id ?? 1)}>VS</button>
-              <button type="button" className="dex-black-key btn-press" onClick={() => !powered ? powerOn() : goTab("ai")}>PROF. DEX</button>
-              <button type="button" className="dex-black-key dex-offline-key btn-press" aria-pressed={offlineMode} onClick={toggleOfflineMode}>{offlineMode ? "USAR RED" : "MODO LOCAL"}</button>
-            </div>
-          </section>
-        </div>
-        <p className="dex-caption">Pokédex de Kanto · 151 · Gen 1</p>
-      </div>
-    </div>
-  );
-}
-
-function tabLabel(tab: Tab) {
-  if (tab === "quiz") return "¿Quién es ese?";
-  if (tab === "game") return "Juego";
-  if (tab === "ai") return "Profesor Dex";
-  if (tab === "detail") return "Ficha";
-  if (tab === "compare") return "Comparar";
-  return "Índice";
-}
-
-function ListView(props: {
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";export function ListView(props: {
   query: string;
   setQuery: (value: string) => void;
   error: string | null;
@@ -460,12 +78,12 @@ function ListView(props: {
     <div className="dex-list-view">
       <div className="mb-3 flex items-end justify-between border-b-2 border-pk-muted pb-2">
         <h1 className="font-display text-[11px] leading-relaxed text-pk-ink">POKEDEX</h1>
-        <span className="rounded-sm bg-pk-ink px-2 py-1 font-body text-sm text-pk-screen">GEN 1 · 151</span>
+        <span className="rounded-sm bg-pk-ink px-2 py-1 font-body text-sm text-pk-screen">GEN 1 Â· 151</span>
       </div>
       <div className="relative mb-2">
         <div className="flex gap-1">
           <label className="sr-only" htmlFor="dex-search">
-            Buscar Pokémon
+            Buscar PokÃ©mon
           </label>
           <input
             id="dex-search"
@@ -483,7 +101,7 @@ function ListView(props: {
               }
               if (e.key === "Escape") props.setSuggestOpen(false);
             }}
-            placeholder="Nº o nombre…"
+            placeholder="NÂº o nombreâ€¦"
             className="h-11 min-h-11 flex-1 rounded-md border-2 border-pk-muted bg-pk-panel px-3 font-body text-xl text-pk-ink outline-none placeholder:text-pk-muted focus:border-pk-ink"
             autoComplete="off"
           />
@@ -598,7 +216,7 @@ function ListView(props: {
 
       {props.visible.length === 0 ? (
         <p className="py-10 text-center font-body text-xl text-pk-muted">
-          No hay Pokémon con ese filtro.
+          No hay PokÃ©mon con ese filtro.
         </p>
       ) : (
         <div className="grid grid-cols-3 gap-2">
@@ -617,7 +235,7 @@ function ListView(props: {
                 aria-label={
                   props.fav.has(p.id)
                     ? "Quitar de favoritos"
-                    : "Añadir a favoritos"
+                    : "AÃ±adir a favoritos"
                 }
                 onClick={() => props.fav.toggle(p.id)}
                 className="absolute right-1 top-1 z-10 text-pk-ink"
@@ -663,7 +281,7 @@ function ListView(props: {
   );
 }
 
-function DetailView({
+export function DetailView({
   selectedId,
   onBack,
   onOpen,
@@ -698,12 +316,12 @@ function DetailView({
       </button>
       {selectedId == null && (
         <p className="py-8 text-center font-body text-xl text-pk-muted">
-          Elige un Pokémon de la lista o búscalo.
+          Elige un PokÃ©mon de la lista o bÃºscalo.
         </p>
       )}
       {q.isLoading && (
         <p className="py-8 text-center font-body text-xl text-pk-muted">
-          Consultando PokeAPI…
+          Consultando PokeAPIâ€¦
         </p>
       )}
       {q.isError && (
@@ -773,7 +391,7 @@ function PokemonSheet({
     playDexOpen();
     if (!offlineMode) playCry(p.cry);
     speakDex(
-      `Pokémon número ${p.id}. ${p.nameEs}. Tipo ${typeLabel}.`,
+      `PokÃ©mon nÃºmero ${p.id}. ${p.nameEs}. Tipo ${typeLabel}.`,
     );
     setAiNote(null);
     return () => {
@@ -783,7 +401,7 @@ function PokemonSheet({
 
   async function analyze() {
     if (offlineMode) {
-      setAiNote("El análisis IA requiere conexión.");
+      setAiNote("El anÃ¡lisis IA requiere conexiÃ³n.");
       return;
     }
     setAiBusy(true);
@@ -813,7 +431,7 @@ function PokemonSheet({
     <div className="space-y-3">
       <div className="pokemon-sheet-shell" style={heroStyle}>
         <div className="pokemon-sheet-header">
-          <span className="pokemon-sheet-badge">Nº {padDex(p.id)}</span>
+          <span className="pokemon-sheet-badge">NÂº {padDex(p.id)}</span>
           <span className="pokemon-sheet-tracker">{TYPE_LABELS[p.types[0]] ?? p.types[0]}</span>
         </div>
 
@@ -954,7 +572,7 @@ function PokemonSheet({
         className="btn-press inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-pk-ink font-body text-lg text-pk-screen disabled:opacity-60"
       >
         <Bot className="size-4" />
-        {aiBusy ? "Analizando…" : "Análisis IA"}
+        {aiBusy ? "Analizandoâ€¦" : "AnÃ¡lisis IA"}
       </button>
       {aiNote && (
         <p className="rounded-md border-2 border-pk-ink bg-pk-panel px-3 py-2 font-body text-lg leading-snug">
@@ -983,12 +601,12 @@ function PokemonSheet({
       )}
 
       <div className="grid grid-cols-2 gap-2">
-        <InfoCell label="Altura" value={p.height == null ? "—" : `${p.height} m`} />
-        <InfoCell label="Peso" value={p.weight == null ? "—" : `${p.weight} kg`} />
-        <InfoCell label="Captura" value={String(p.captureRate ?? "—")} />
+        <InfoCell label="Altura" value={p.height == null ? "â€”" : `${p.height} m`} />
+        <InfoCell label="Peso" value={p.weight == null ? "â€”" : `${p.weight} kg`} />
+        <InfoCell label="Captura" value={String(p.captureRate ?? "â€”")} />
         <InfoCell
-          label="Hábitat"
-          value={p.habitat ? titleCase(p.habitat) : "—"}
+          label="HÃ¡bitat"
+          value={p.habitat ? titleCase(p.habitat) : "â€”"}
         />
       </div>
 
@@ -997,7 +615,7 @@ function PokemonSheet({
       <MatchupBlock types={p.types} />
 
       <div className="pokemon-stats-panel">
-        <h3 className="mb-1 font-body text-lg text-pk-muted">Estadísticas</h3>
+        <h3 className="mb-1 font-body text-lg text-pk-muted">EstadÃ­sticas</h3>
         {p.stats.map((s) => (
           <div key={s.name} className="mb-1 flex items-center gap-2">
             <span className="w-16 font-body text-base text-pk-muted">
@@ -1037,7 +655,7 @@ function PokemonSheet({
   );
 }
 
-function InfoCell({ label, value }: { label: string; value: string }) {
+export function InfoCell({ label, value }: { label: string; value: string }) {
   return (
     <div className="pokemon-stat-tile">
       <p className="font-body text-sm uppercase text-pk-muted">{label}</p>
@@ -1046,7 +664,7 @@ function InfoCell({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MatchupBlock({ types }: { types: string[] }) {
+export function MatchupBlock({ types }: { types: string[] }) {
   const m = defenseMatchup(types);
   const rows: { title: string; items: { type: string; mult: number }[] }[] = [
     { title: "Debilidades", items: m.weak },
@@ -1075,7 +693,7 @@ function MatchupBlock({ types }: { types: string[] }) {
   );
 }
 
-function CompareView({
+export function CompareView({
   leftId,
   rightId,
   setLeftId,
@@ -1126,7 +744,7 @@ function CompareView({
           onKeyDown={(e) => {
             if (e.key === "Enter") choose(pick);
           }}
-          placeholder={leftId ? "Rival (nº o nombre)" : "Primer Pokémon"}
+          placeholder={leftId ? "Rival (nÂº o nombre)" : "Primer PokÃ©mon"}
           className="h-11 flex-1 rounded-md border-2 border-pk-muted bg-pk-panel px-3 font-body text-lg outline-none"
         />
         <button
@@ -1134,7 +752,7 @@ function CompareView({
           onClick={() => choose(pick)}
           className="h-11 rounded-md bg-pk-ink px-3 font-body text-lg text-pk-screen"
         >
-          Añadir
+          AÃ±adir
         </button>
       </div>
       <div className="mb-3 grid grid-cols-2 gap-2">
@@ -1209,7 +827,7 @@ function CompareView({
   );
 }
 
-function CompareSlot({
+export function CompareSlot({
   p,
   loading,
 }: {
@@ -1219,20 +837,20 @@ function CompareSlot({
   if (loading) {
     return (
       <div className="rounded-md border-2 border-pk-muted bg-pk-panel px-2 py-6 text-center font-body text-lg text-pk-muted">
-        Cargando…
+        Cargandoâ€¦
       </div>
     );
   }
   if (!p) {
     return (
       <div className="rounded-md border-2 border-dashed border-pk-muted bg-pk-panel px-2 py-6 text-center font-body text-lg text-pk-muted">
-        Elige un Pokémon
+        Elige un PokÃ©mon
       </div>
     );
   }
   return (
     <div className="rounded-md border-2 border-pk-muted bg-pk-panel p-2 text-center">
-      <p className="font-body text-sm text-pk-muted">Nº {padDex(p.id)}</p>
+      <p className="font-body text-sm text-pk-muted">NÂº {padDex(p.id)}</p>
       <img
         src={p.animated ?? p.sprite}
         alt={p.nameEs}
@@ -1248,7 +866,7 @@ function CompareSlot({
   );
 }
 
-function EvolutionRow({
+export function EvolutionRow({
   stages,
   onOpen,
   currentId,
@@ -1303,7 +921,7 @@ function EvolutionRow({
   );
 }
 
-function QuizView({
+export function QuizView({
   onOpen,
   offlineMode,
 }: {
@@ -1341,7 +959,7 @@ function QuizView({
     if (!q.data || revealed) return;
     playWhoIsThat();
     playQuizLoop();
-    speakDex("¿Quién es ese Pokémon?");
+    speakDex("Â¿QuiÃ©n es ese PokÃ©mon?");
     return () => {
       stopLoop();
     };
@@ -1355,9 +973,9 @@ function QuizView({
     const g = (raw ?? guess).trim().toLowerCase();
     if (!g) return;
     const names = [p.name, p.nameEs].map((n) =>
-      n.toLowerCase().replace(/[.'♀♂]/g, ""),
+      n.toLowerCase().replace(/[.'â™€â™‚]/g, ""),
     );
-    const compact = g.replace(/[.'♀♂\s]/g, "");
+    const compact = g.replace(/[.'â™€â™‚\s]/g, "");
     const hit = names.some((n) => {
       const clean = n.replace(/-/g, "");
       return (
@@ -1378,7 +996,7 @@ function QuizView({
           `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${p.id}.ogg`,
         );
       }
-      speakDex(`¡Correcto! Es ${p.nameEs}.`);
+      speakDex(`Â¡Correcto! Es ${p.nameEs}.`);
     } else {
       playWrongSfx();
       speakDex(`Incorrecto. Era ${p.nameEs}.`);
@@ -1409,7 +1027,7 @@ function QuizView({
   return (
     <div className="dex-quiz-view">
       <h2 className="mb-3 text-center font-display text-[11px] leading-relaxed">
-        ¿Quién es ese Pokémon?
+        Â¿QuiÃ©n es ese PokÃ©mon?
       </h2>
       <div className="quiz-stage quiz-portrait mx-auto mb-4 flex size-44 items-center justify-center rounded-lg border-4 border-pk-muted">
         {p ? (
@@ -1422,7 +1040,7 @@ function QuizView({
             )}
           />
         ) : (
-          <span className="font-body text-lg text-pk-muted">Cargando…</span>
+          <span className="font-body text-lg text-pk-muted">Cargandoâ€¦</span>
         )}
       </div>
 
@@ -1433,7 +1051,7 @@ function QuizView({
           onKeyDown={(e) => {
             if (e.key === "Enter" && p && !revealed) check(p);
           }}
-          placeholder="Escribe el nombre…"
+          placeholder="Escribe el nombreâ€¦"
           disabled={!p || revealed}
           className="h-11 flex-1 rounded-md border-2 border-pk-muted bg-pk-panel px-3 font-body text-xl outline-none disabled:opacity-60"
         />
@@ -1496,7 +1114,7 @@ function QuizView({
           disabled={!p || revealed || hintBusy}
           className="btn-press h-10 flex-1 rounded-md bg-pk-screen-dim font-body text-lg disabled:opacity-50"
         >
-          {hintBusy ? "Pista…" : "Pista IA"}
+          {hintBusy ? "Pistaâ€¦" : "Pista IA"}
         </button>
         <button
           type="button"
@@ -1529,33 +1147,33 @@ function QuizView({
         </button>
       )}
       <p className="quiz-score text-center font-body text-lg text-pk-muted">
-        Aciertos {score.ok} · Fallos {score.bad}
+        Aciertos {score.ok} Â· Fallos {score.bad}
       </p>
     </div>
   );
 }
 
-function BootScreen({ onPower }: { onPower: () => void }) {
+export function BootScreen({ onPower }: { onPower: () => void }) {
   return (
     <div className="dex-boot-screen flex min-h-70 flex-col items-center justify-center text-center">
-      <p className="font-display text-[11px] leading-relaxed">Pokémon</p>
+      <p className="font-display text-[11px] leading-relaxed">PokÃ©mon</p>
       <p className="font-display text-[11px] leading-relaxed">Rojo y Verde</p>
-      <p className="mt-3 font-body text-xl text-pk-muted">Kanto · 151</p>
+      <p className="mt-3 font-body text-xl text-pk-muted">Kanto Â· 151</p>
       <p className="mt-6 max-w-[16rem] font-body text-lg leading-snug">
-        Elige la versión y entra en la región de Kanto.
+        Elige la versiÃ³n y entra en la regiÃ³n de Kanto.
       </p>
       <button
         type="button"
         onClick={onPower}
         className="btn-press mt-6 h-12 rounded-md bg-pk-ink px-6 font-body text-lg text-pk-screen"
       >
-        Pokémon Rojo y Pokémon Verde
+        PokÃ©mon Rojo y PokÃ©mon Verde
       </button>
     </div>
   );
 }
 
-function GameView({
+export function GameView({
   log,
   muted,
   offlineMode,
@@ -1578,7 +1196,7 @@ function GameView({
   const [enemyMaxHp, setEnemyMaxHp] = useState(30);
   const [enemyAttackStage, setEnemyAttackStage] = useState(0);
   const [enemyDefenseStage, setEnemyDefenseStage] = useState(0);
-  const [message, setMessage] = useState("Un Pokémon salvaje apareció.");
+  const [message, setMessage] = useState("Un PokÃ©mon salvaje apareciÃ³.");
   const [enemyDefeated, setEnemyDefeated] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [choosingMove, setChoosingMove] = useState(false);
@@ -1680,7 +1298,7 @@ function GameView({
     setChoosingMove(false);
     setBagOpen(false);
     setPartyOpen(false);
-    setMessage(`¡${next.nameEs} salvaje apareció!`);
+    setMessage(`Â¡${next.nameEs} salvaje apareciÃ³!`);
     return next;
   }
 
@@ -1724,7 +1342,7 @@ function GameView({
       setPlayerHp((current) => current + levelsGained * 5);
     }
     setMessage(
-      `¡${encounter.nameEs} cayó! ${player.nameEs} ganó ${gained} EXP${levelsGained > 0 ? ` y subió al nivel ${nextLevel}` : ""}${evolvedPokemonName ? ` y evolucionó a ${evolvedPokemonName}` : ""}.`,
+      `Â¡${encounter.nameEs} cayÃ³! ${player.nameEs} ganÃ³ ${gained} EXP${levelsGained > 0 ? ` y subiÃ³ al nivel ${nextLevel}` : ""}${evolvedPokemonName ? ` y evolucionÃ³ a ${evolvedPokemonName}` : ""}.`,
     );
     return { pokemonId: evolvedPokemonId, progress: nextProgress };
   }
@@ -1754,7 +1372,7 @@ function GameView({
     }
     log.markSeen(evolution.id);
     if (!log.isCaught(evolution.id)) log.toggleCaught(evolution.id);
-    setMessage(`¡${fromPokemon?.nameEs ?? player.nameEs} evolucionó a ${toPokemon?.nameEs ?? evolution.name}!`);
+    setMessage(`Â¡${fromPokemon?.nameEs ?? player.nameEs} evolucionÃ³ a ${toPokemon?.nameEs ?? evolution.name}!`);
     return nextProgress;
   }
 
@@ -1797,9 +1415,9 @@ function GameView({
           effectiveEnemyAttackStage = nextStage;
         }
         else setEnemyDefenseStage(nextStage);
-        playerTurnMessage = `¡${formatMoveName(move)}! El ${moveEffect.label} de ${encounter.nameEs} bajó.`;
+        playerTurnMessage = `Â¡${formatMoveName(move)}! El ${moveEffect.label} de ${encounter.nameEs} bajÃ³.`;
       } else {
-        playerTurnMessage = `¡${formatMoveName(move)}! ${encounter.nameEs} no puede bajar más su ${moveEffect.label}.`;
+        playerTurnMessage = `Â¡${formatMoveName(move)}! ${encounter.nameEs} no puede bajar mÃ¡s su ${moveEffect.label}.`;
       }
       animateBattleSequence([
         { action: "player-attack", duration: 300 },
@@ -1829,15 +1447,15 @@ function GameView({
           : undefined;
         if (itemEvolution) {
           evolvePokemon(itemEvolution, reward.pokemonId, reward.progress);
-          setMessage(`¡${encounter.nameEs} dejó caer ${item.name}! ¡${player.nameEs} evolucionó a ${itemEvolution.name}!`);
+          setMessage(`Â¡${encounter.nameEs} dejÃ³ caer ${item.name}! Â¡${player.nameEs} evolucionÃ³ a ${itemEvolution.name}!`);
         } else {
           setInventory((current) => [...current, item]);
-          setMessage((current) => `${current} Dejó caer: ${item.name}.`);
+          setMessage((current) => `${current} DejÃ³ caer: ${item.name}.`);
         }
         return;
       }
 
-      playerTurnMessage = `¡${formatMoveName(move)}! ${encounter.nameEs} recibió ${damage} PS de daño.`;
+      playerTurnMessage = `Â¡${formatMoveName(move)}! ${encounter.nameEs} recibiÃ³ ${damage} PS de daÃ±o.`;
       animateBattleSequence([
         { action: "player-attack", duration: 300 },
         { action: "enemy-hit", duration: 220 },
@@ -1854,9 +1472,9 @@ function GameView({
     setMessage(
       nextPlayerHp === 0
         ? reservePokemon.length > 0
-          ? `¡${player.nameEs} se debilitó! Elige otro Pokémon.`
-          : `¡${encounter.nameEs} debilitó a ${player.nameEs}! ¡Has perdido!`
-        : `${playerTurnMessage} ¡${encounter.nameEs} contraataca y causa ${reducedEnemyDamage} PS de daño.`,
+          ? `Â¡${player.nameEs} se debilitÃ³! Elige otro PokÃ©mon.`
+          : `Â¡${encounter.nameEs} debilitÃ³ a ${player.nameEs}! Â¡Has perdido!`
+        : `${playerTurnMessage} Â¡${encounter.nameEs} contraataca y causa ${reducedEnemyDamage} PS de daÃ±o.`,
     );
     if (nextPlayerHp === 0) {
       if (reservePokemon.length > 0) setPartyOpen(true);
@@ -1872,7 +1490,7 @@ function GameView({
       playBattleHeal();
       setPlayerHp((current) => Math.min(playerMaxHp, current + item.power));
       setInventory((current) => current.filter((_, index) => index !== itemIndex));
-      setMessage(`${player.nameEs} usó ${item.name}.`);
+      setMessage(`${player.nameEs} usÃ³ ${item.name}.`);
       setBagOpen(false);
       return;
     }
@@ -1900,11 +1518,11 @@ function GameView({
         const teamFull = teamPokemon.length >= PARTY_LIMIT && !teamPokemon.some((pokemon) => pokemon.id === encounter.id);
         setMessage(
           teamFull
-            ? `¡${encounter.nameEs} se registró en la Pokédex! Equipo completo: ${PARTY_LIMIT}/${PARTY_LIMIT}.`
-            : `¡Capturaste a ${encounter.nameEs}! Ya está en tu equipo.`,
+            ? `Â¡${encounter.nameEs} se registrÃ³ en la PokÃ©dex! Equipo completo: ${PARTY_LIMIT}/${PARTY_LIMIT}.`
+            : `Â¡Capturaste a ${encounter.nameEs}! Ya estÃ¡ en tu equipo.`,
         );
       } else {
-        setMessage(`¡${encounter.nameEs} escapó de la Poké Ball!`);
+        setMessage(`Â¡${encounter.nameEs} escapÃ³ de la PokÃ© Ball!`);
       }
       setBagOpen(false);
       return;
@@ -1926,7 +1544,7 @@ function GameView({
     setChoosingMove(false);
     setBagOpen(false);
     setPartyOpen(false);
-    setMessage("Huiste del combate. La partida terminó.");
+    setMessage("Huiste del combate. La partida terminÃ³.");
   }
 
   function restartBattle() {
@@ -1946,7 +1564,7 @@ function GameView({
 
   function continueAfterWin() {
     const next = spawnRandomEncounter();
-    setMessage(`¡Adelante! Apareció ${next.nameEs}.`);
+    setMessage(`Â¡Adelante! ApareciÃ³ ${next.nameEs}.`);
   }
 
   return (
@@ -1954,7 +1572,7 @@ function GameView({
       <div className="battle-header">
         <div className="battle-header__brand">
           <span className="battle-header__icon" aria-hidden />
-          <span>Pokémon · Kanto</span>
+          <span>PokÃ©mon Â· Kanto</span>
         </div>
         <span className="battle-header__team">Equipo {teamPokemon.length}/{PARTY_LIMIT}</span>
       </div>
@@ -2021,7 +1639,7 @@ function GameView({
           <div className="battle-status__bar battle-status__bar--xp">
             <span style={{ width: `${xpRatio}%` }} />
           </div>
-          <span className="battle-status__hp">{playerHp} / {playerMaxHp} PS · {playerXp}/{xpThreshold} EXP</span>
+          <span className="battle-status__hp">{playerHp} / {playerMaxHp} PS Â· {playerXp}/{xpThreshold} EXP</span>
         </div>
       </div>
 
@@ -2030,7 +1648,7 @@ function GameView({
       {gameOver || (playerHp <= 0 && reservePokemon.length === 0) ? (
         <div className="battle-actions">
           <button type="button" onClick={restartBattle} className="btn-press battle-actions__btn battle-actions__btn--primary">Reintentar</button>
-          <button type="button" onClick={onMenu} className="btn-press battle-actions__btn">Ir al menú</button>
+          <button type="button" onClick={onMenu} className="btn-press battle-actions__btn">Ir al menÃº</button>
         </div>
       ) : enemyDefeated ? (
         <button type="button" onClick={continueAfterWin} className="btn-press battle-actions__btn battle-actions__btn--primary">Continuar</button>
@@ -2038,10 +1656,10 @@ function GameView({
         <div className="battle-inventory">
           <div className="battle-inventory__heading">
             <span>Mochila</span>
-            <button type="button" onClick={() => { playClick(); setBagOpen(false); }} aria-label="Cerrar mochila">×</button>
+            <button type="button" onClick={() => { playClick(); setBagOpen(false); }} aria-label="Cerrar mochila">Ã—</button>
           </div>
           {inventory.length === 0 ? (
-            <p>La mochila está vacía.</p>
+            <p>La mochila estÃ¡ vacÃ­a.</p>
           ) : (
             inventory.map((item, index) => (
               <button key={`${item.name}-${index}`} type="button" onClick={() => handleBattleItem(index)}>
@@ -2053,11 +1671,11 @@ function GameView({
       ) : partyOpen || playerHp <= 0 ? (
         <div className="battle-inventory battle-party">
           <div className="battle-inventory__heading">
-            <span>Equipo {teamPokemon.length}/{PARTY_LIMIT}{playerHp <= 0 ? " · Elige otro" : ""}</span>
-            {playerHp > 0 && <button type="button" onClick={() => { playClick(); setPartyOpen(false); }} aria-label="Cerrar equipo">×</button>}
+            <span>Equipo {teamPokemon.length}/{PARTY_LIMIT}{playerHp <= 0 ? " Â· Elige otro" : ""}</span>
+            {playerHp > 0 && <button type="button" onClick={() => { playClick(); setPartyOpen(false); }} aria-label="Cerrar equipo">Ã—</button>}
           </div>
           {reservePokemon.length === 0 ? (
-            <p>No quedan compañeros disponibles.</p>
+            <p>No quedan compaÃ±eros disponibles.</p>
           ) : (
             reservePokemon.map((pokemon) => (
               <button key={pokemon.id} type="button" onClick={() => choosePokemon(pokemon.id)}>
@@ -2075,7 +1693,7 @@ function GameView({
               </button>
             )) : (
               <p className="battle-actions__loading">
-                {playerQuery.isPending ? "Cargando movimientos…" : "No hay movimientos aprendidos a este nivel."}
+                {playerQuery.isPending ? "Cargando movimientosâ€¦" : "No hay movimientos aprendidos a este nivel."}
               </p>
             )}
           <button type="button" onClick={() => { playClick(); setChoosingMove(false); }} className="btn-press battle-actions__back">
@@ -2091,7 +1709,7 @@ function GameView({
             Mochila
           </button>
           <button type="button" onClick={() => { playClick(); setPartyOpen(true); }} className="btn-press battle-actions__btn">
-            Pokémon
+            PokÃ©mon
           </button>
           <button type="button" onClick={flee} className="btn-press battle-actions__btn">
             Huir
@@ -2167,9 +1785,9 @@ function savePokemonProgress(progress: PokemonProgressMap) {
 }
 
 const WORLD_ITEMS = [
-  { name: "Poción", effect: "heal", power: 20 },
-  { name: "Superpoción", effect: "heal", power: 40 },
-  { name: "Poké Ball", effect: "catch", power: 0 },
+  { name: "PociÃ³n", effect: "heal", power: 20 },
+  { name: "SuperpociÃ³n", effect: "heal", power: 40 },
+  { name: "PokÃ© Ball", effect: "catch", power: 0 },
   { name: "Cebo", effect: "attract", power: 0 },
 ] as const;
 
@@ -2193,8 +1811,8 @@ function battleSpriteUrl(id: number, side: "front" | "back") {
 function formatMoveName(move: string) {
   const spanishNames: Record<string, string> = {
     "water-gun": "Pistola Agua",
-    "tail-whip": "Látigo",
-    growl: "Gruñido",
+    "tail-whip": "LÃ¡tigo",
+    growl: "GruÃ±ido",
     leer: "Malicioso",
     screech: "Chirrido",
     "poison-powder": "Polvo Veneno",
@@ -2202,8 +1820,8 @@ function formatMoveName(move: string) {
     "take-down": "Derribo",
     tackle: "Placaje",
     "bubble": "Burbuja",
-    "quick-attack": "Ataque Rápido",
-    "vine-whip": "Látigo Cepa",
+    "quick-attack": "Ataque RÃ¡pido",
+    "vine-whip": "LÃ¡tigo Cepa",
     "thunder-shock": "Impactrueno",
     "body-slam": "Golpe Cuerpo",
     "double-edge": "Doble Filo",
@@ -2211,7 +1829,7 @@ function formatMoveName(move: string) {
   return spanishNames[move] ?? move.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function AiView({
+export function AiView({
   selectedId,
   offlineMode,
 }: {
@@ -2234,7 +1852,7 @@ function AiView({
     setQuestion("");
     setLog((prev) => [...prev, { role: "user", text: prompt }]);
     if (offlineMode) {
-      setLog((prev) => [...prev, { role: "dex", text: "El Profesor Dex necesita conexión. El catálogo, las fichas guardadas y los juegos locales siguen disponibles." }]);
+      setLog((prev) => [...prev, { role: "dex", text: "El Profesor Dex necesita conexiÃ³n. El catÃ¡logo, las fichas guardadas y los juegos locales siguen disponibles." }]);
       return;
     }
     setBusy(true);
@@ -2262,9 +1880,9 @@ function AiView({
   }
 
   const chips = [
-    "¿Cuál es el más rápido de Kanto?",
-    "¿Qué tipos le ganan al agua?",
-    selectedId ? "¿Cómo lo uso en combate?" : "¿Quién es el nº 25?",
+    "Â¿CuÃ¡l es el mÃ¡s rÃ¡pido de Kanto?",
+    "Â¿QuÃ© tipos le ganan al agua?",
+    selectedId ? "Â¿CÃ³mo lo uso en combate?" : "Â¿QuiÃ©n es el nÂº 25?",
   ];
 
   return (
@@ -2275,11 +1893,11 @@ function AiView({
       </h2>
       <p className="mb-3 font-body text-lg leading-snug text-pk-muted">
         IA de Kanto
-        {q.data ? ` · ficha de ${q.data.nameEs}` : " · abre una ficha para más contexto"}
+        {q.data ? ` Â· ficha de ${q.data.nameEs}` : " Â· abre una ficha para mÃ¡s contexto"}
       </p>
       {offlineMode && (
         <p className="mb-2 rounded-md border-2 border-pk-muted bg-pk-panel px-3 py-2 font-body text-lg">
-          El Profesor Dex requiere conexión. El resto del catálogo sigue disponible.
+          El Profesor Dex requiere conexiÃ³n. El resto del catÃ¡logo sigue disponible.
         </p>
       )}
       <div className="mb-2 flex flex-wrap gap-1">
@@ -2298,7 +1916,7 @@ function AiView({
       <div className="mb-2 max-h-56 space-y-2 overflow-y-auto">
         {log.length === 0 && (
           <p className="rounded-md border-2 border-pk-muted bg-pk-panel px-3 py-2 font-body text-lg">
-            Pregúntame tipos, combates, evoluciones o el juego de la silueta.
+            PregÃºntame tipos, combates, evoluciones o el juego de la silueta.
           </p>
         )}
         {log.map((m, i) => (
@@ -2315,7 +1933,7 @@ function AiView({
           </p>
         ))}
         {busy && (
-          <p className="font-body text-lg text-pk-muted">Pensando…</p>
+          <p className="font-body text-lg text-pk-muted">Pensandoâ€¦</p>
         )}
       </div>
       <div className="flex gap-1">
@@ -2325,7 +1943,7 @@ function AiView({
           onKeyDown={(e) => {
             if (e.key === "Enter") void send(question);
           }}
-          placeholder="Pregunta a la IA…"
+          placeholder="Pregunta a la IAâ€¦"
           disabled={offlineMode}
           className="h-11 flex-1 rounded-md border-2 border-pk-muted bg-pk-panel px-3 font-body text-lg outline-none disabled:opacity-50"
         />
@@ -2341,3 +1959,4 @@ function AiView({
     </div>
   );
 }
+
