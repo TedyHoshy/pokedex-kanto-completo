@@ -1017,17 +1017,18 @@
 
 .dex-panel {
   background:
-    linear-gradient(180deg, var(--color-pk-shell-1) 0%, var(--color-pk-shell-2) 14%, var(--color-pk-red) 30%, var(--color-pk-shell-3) 55%, var(--color-pk-shell-4) 100%),
-    radial-gradient(circle at top left, rgba(255,255,255,0.44), transparent 24%);
+    linear-gradient(165deg, #ffc8c8 0%, #ff8a8a 8%, var(--color-pk-shell-2) 18%, var(--color-pk-red) 38%, var(--color-pk-shell-3) 68%, var(--color-pk-shell-4) 100%),
+    radial-gradient(ellipse 80% 50% at 20% 8%, rgba(255, 255, 255, 0.55), transparent 50%),
+    radial-gradient(ellipse 60% 40% at 80% 90%, rgba(0, 0, 0, 0.15), transparent 50%);
   position: relative;
-  border: 6px solid rgba(56, 0, 0, 0.76);
+  border: 5px solid rgba(70, 8, 8, 0.82);
   box-shadow:
-    inset 0 6px 0 rgba(255, 255, 255, 0.28),
-    inset 0 -18px 24px rgba(0, 0, 0, 0.22),
-    inset 0 18px 26px rgba(255, 214, 214, 0.2),
-    0 34px 52px rgba(0, 0, 0, 0.42),
-    0 0 0 1px rgba(255,255,255,0.06),
-    0 0 28px rgba(170, 18, 18, 0.18);
+    inset 0 7px 0 rgba(255, 255, 255, 0.32),
+    inset 0 -20px 28px rgba(0, 0, 0, 0.28),
+    inset 0 20px 30px rgba(255, 220, 220, 0.18),
+    0 36px 56px rgba(0, 0, 0, 0.48),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 32px rgba(190, 30, 30, 0.22);
 }
 
 .dex-panel::before {
@@ -1297,55 +1298,75 @@
 }
 
 .dex-lcd {
-  height: 72px;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #161616 0%, #090909 100%);
-  color: #7cff7c;
+  height: 68px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #1a1a1a 0%, #0a0a0a 100%);
+  color: #6dff6d;
   font-family: var(--font-body);
-  font-size: 22px;
-  letter-spacing: 0.04em;
+  font-size: 20px;
+  letter-spacing: 0.03em;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 8px 12px;
+  padding: 6px 12px;
   box-shadow:
-    inset 0 2px 6px rgba(0, 0, 0, 0.8),
-    inset 0 0 0 2px rgba(255,255,255,0.03),
-    0 0 10px rgba(124, 255, 124, 0.08);
-  margin-bottom: 14px;
-  text-shadow: 0 0 8px rgba(124, 255, 124, 0.2);
+    inset 0 3px 8px rgba(0, 0, 0, 0.85),
+    inset 0 0 0 2px rgba(255, 255, 255, 0.04),
+    0 0 12px rgba(109, 255, 109, 0.1);
+  margin-bottom: 8px;
+  text-shadow: 0 0 10px rgba(109, 255, 109, 0.25);
+  border: 1px solid rgba(0, 0, 0, 0.6);
 }
 
 .dex-blue-pad {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: repeat(2, 52px);
-  gap: 3px;
-  background: linear-gradient(180deg, #1f1f1f 0%, #0d0d0d 100%);
-  padding: 3px;
-  border-radius: 4px;
-  margin-bottom: 18px;
-  box-shadow: 0 3px 0 #0a0a0a, inset 0 0 0 1px rgba(255,255,255,0.05);
+  grid-template-rows: repeat(2, 58px);
+  gap: 5px;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  margin-bottom: 16px;
+  box-shadow: none;
 }
 
 .dex-blue-pad button {
-  background: linear-gradient(180deg, #8ed0ff 0%, #4ca7ff 32%, #2d7fe9 100%);
-  color: #062445;
-  border: 1px solid rgba(8, 30, 60, 0.42);
-  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: linear-gradient(180deg, #7ec8ff 0%, #3d9dff 28%, #1f6fd4 100%);
+  color: #042038;
+  border: 1px solid rgba(8, 30, 60, 0.55);
+  border-radius: 8px;
   font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -3px 4px rgba(0, 0, 0, 0.18),
+    0 3px 0 rgba(13, 52, 94, 0.55),
+    0 4px 8px rgba(0, 0, 0, 0.18);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition: filter 0.12s ease, transform 0.08s ease;
+}
+
+.dex-blue-pad button .dex-key-icon {
   font-size: 15px;
   line-height: 1;
-  box-shadow:
-    inset 0 2px 0 rgba(255,255,255,0.38),
-    inset 0 -2px 0 rgba(0,0,0,0.15),
-    0 2px 0 rgba(13, 52, 94, 0.5);
-  text-shadow: 0 1px 0 rgba(255,255,255,0.2);
+  opacity: 0.95;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.35));
 }
 
 .dex-blue-pad button.is-on {
-  background: linear-gradient(180deg, #9ad3ff 0%, #7fc4ff 100%);
-  box-shadow: inset 0 2px 0 rgba(255,255,255,0.45), 0 0 10px rgba(120, 204, 255, 0.35), inset 0 -2px 0 rgba(0,0,0,0.1);
+  background: linear-gradient(180deg, #a8dcff 0%, #6eb8ff 40%, #3d9dff 100%);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.55),
+    0 0 14px rgba(120, 204, 255, 0.45),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.12),
+    0 2px 0 rgba(13, 52, 94, 0.4);
 }
 
 .dex-right-mid {
@@ -1385,57 +1406,60 @@
 
 .dex-black-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  grid-template-columns: 1fr 1.35fr 1.45fr;
+  gap: 8px;
 }
 
 .dex-connection-indicator {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  margin: -0.5rem 0 0.8rem;
-  padding: 0.2rem 0.35rem;
-  color: #32632a;
+  gap: 0.35rem;
+  margin: 0 0 10px;
+  padding: 0;
+  color: #3a8f32;
   font-family: var(--font-display);
-  font-size: 0.42rem;
+  font-size: 0.48rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .dex-connection-indicator.is-local {
-  color: #784b10;
+  color: #c48a20;
 }
 
 .dex-connection-dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 8px;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
   border-radius: 50%;
-  background: #459e3d;
-  box-shadow: 0 0 0 2px rgba(28, 46, 20, 0.2);
+  background: #4caf40;
+  box-shadow: 0 0 6px #4caf40, 0 0 0 1.5px rgba(20, 40, 15, 0.35);
 }
 
 .dex-connection-indicator.is-local .dex-connection-dot {
-  background: #e5a525;
+  background: #f0b020;
+  box-shadow: 0 0 6px #f0b020, 0 0 0 1.5px rgba(40, 30, 10, 0.35);
 }
 
 .dex-offline-key {
-  grid-column: 1 / -1;
-  height: 32px;
-  font-size: 13px;
+  height: 34px;
+  font-size: 12px;
 }
 
 .dex-black-key {
   height: 36px;
   border: 0;
-  border-radius: 6px;
-  background: linear-gradient(180deg, #2d2d2d 0%, #171717 45%, #0d0d0d 100%);
-  color: #d9d9d9;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #3a3a3a 0%, #1c1c1c 45%, #0c0c0c 100%);
+  color: #e8e8e8;
   font-family: var(--font-body);
-  font-size: 15px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
   box-shadow:
-    inset 0 2px 0 rgba(255,255,255,0.1),
-    0 2px 0 rgba(0,0,0,0.5),
-    inset 0 -2px 0 rgba(0,0,0,0.2),
-    0 0 0 1px rgba(255,255,255,0.04);
+    inset 0 2px 0 rgba(255, 255, 255, 0.12),
+    0 3px 0 rgba(0, 0, 0, 0.55),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 
 .dex-caption {
@@ -1721,45 +1745,88 @@
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  min-height: 320px;
+  min-height: 340px;
   border: 2px solid rgba(28, 46, 20, 0.36);
   background:
-    linear-gradient(rgba(28, 46, 20, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(28, 46, 20, 0.06) 1px, transparent 1px),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.27), transparent 60%);
-  background-size: 12px 12px, 12px 12px, auto;
-  box-shadow: inset 0 0 28px rgba(28, 46, 20, 0.14);
+    linear-gradient(rgba(28, 46, 20, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(28, 46, 20, 0.07) 1px, transparent 1px),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.32) 0%, transparent 55%),
+    linear-gradient(180deg, #b8e08a 0%, #8fc46a 100%);
+  background-size: 14px 14px, 14px 14px, auto, auto;
+  box-shadow:
+    inset 0 0 32px rgba(28, 46, 20, 0.16),
+    inset 0 2px 0 rgba(255, 255, 255, 0.25);
 }
 
-.dex-boot-screen::before {
-  content: "";
-  width: 48px;
-  height: 48px;
-  margin-bottom: 12px;
+.dex-boot-pokeball {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 14px;
   border: 3px solid #1c2e14;
   border-radius: 50%;
-  background: linear-gradient(#e33a3a 0 44%, #1c2e14 44% 56%, #f3efe4 56%);
-  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.35), 0 4px 0 rgba(28, 46, 20, 0.25);
+  background: linear-gradient(#e33a3a 0 46%, #1c2e14 46% 54%, #f3efe4 54%);
+  box-shadow:
+    inset 0 0 0 3px rgba(255, 255, 255, 0.4),
+    0 5px 0 rgba(28, 46, 20, 0.28),
+    0 0 12px rgba(227, 58, 58, 0.25);
+  position: relative;
 }
 
-.dex-boot-screen::after {
-  content: "KANTO REGION · 1996";
+.dex-boot-pokeball::after {
+  content: "";
   position: absolute;
-  right: 10px;
-  bottom: 8px;
-  color: rgba(28, 46, 20, 0.5);
-  font-family: var(--font-display);
-  font-size: 7px;
-}
-
-.dex-boot-screen > p:first-of-type {
-  color: #b3232b;
-  text-shadow: 1px 1px #f6d742, 2px 2px rgba(28, 46, 20, 0.22);
-}
-
-.dex-boot-screen > button {
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
   border: 2px solid #1c2e14;
-  box-shadow: 0 4px 0 #101d0c, inset 0 1px rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  background: #f3efe4;
+  box-shadow: inset 0 0 0 2px #1c2e14;
+}
+
+.dex-boot-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2.75rem;
+  padding: 0 1.1rem;
+  border-radius: 999px;
+  border: 2px solid #1c2e14;
+  background: linear-gradient(180deg, #3d5a32 0%, #1c2e14 100%);
+  color: #c6e4a6;
+  font-family: var(--font-body);
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  box-shadow:
+    0 4px 0 #0d1a0a,
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.dex-boot-cta:hover {
+  filter: brightness(1.08);
+}
+
+.dex-boot-year {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(28, 46, 20, 0.55);
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.dex-boot-year-ball {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid #1c2e14;
+  border-radius: 50%;
+  background: linear-gradient(#e33a3a 0 46%, #1c2e14 46% 54%, #f3efe4 54%);
 }
 
 .quiz-portrait {
