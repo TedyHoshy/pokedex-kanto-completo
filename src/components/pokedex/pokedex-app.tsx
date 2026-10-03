@@ -5,6 +5,9 @@ import {
   findInCatalog,
   MAX_DEX,
   RANGE_ERROR,
+  shinyAnimatedGifUrl,
+  shinyArtworkUrl,
+  shinySpriteUrl,
   spriteUrl,
   suggestCatalog,
   TYPE_CLASS,
@@ -18,6 +21,12 @@ import {
   isMuted,
   loadMutePref,
   playBoot,
+  playBattleAttack,
+  playBattleDangerLoop,
+  playBattleFlee,
+  playBattleHeal,
+  playBattleHit,
+  playBattleLoop,
   playClick,
   playCorrectSfx,
   playCry,
@@ -26,11 +35,13 @@ import {
   playWhoIsThat,
   playWrongSfx,
   setMuted,
+  stopCry,
   stopLoop,
   unlockAudio,
 } from "@/lib/pokemon/sfx";
 import { speakDex, stopSpeak, warmupVoices } from "@/lib/pokemon/voice";
-import type { PokemonDetail, QuizPokemon } from "@/lib/pokemon/types";
+import type { EvolutionNode, PokemonDetail, QuizPokemon } from "@/lib/pokemon/types";
+import { getLocalQuiz, getOfflinePokemon, saveOfflinePokemon } from "@/lib/pokemon/offline";
 import { cn, padDex, titleCase } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -43,7 +54,28 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
-type Tab = "list" | "detail" | "quiz" | "ai" | "compare";
+type Tab = "list" | "detail" | "quiz" | "ai" | "compare" | "game";
+
+const PARTY_LIMIT = 6;
+const OFFLINE_MODE_KEY = "pokedex-kanto:offline-mode";
+
+async function loadPokemonForMode(id: number, offlineMode: boolean) {
+  const local = getOfflinePokemon(id);
+  if (offlineMode) {
+    if (local) return local;
+    throw new Error("Este Pokémon no está en el catálogo local.");
+  }
+
+  try {
+    const result = await getPokemonFn({ data: { q: String(id) } });
+    if (!result.ok) throw new Error(result.error);
+    saveOfflinePokemon(result.data);
+    return result.data;
+  } catch (error) {
+    if (local) return local;
+    throw error;
+  }
+}
 
 const STAT_LABEL: Record<string, string> = {
   hp: "PS",
@@ -54,13 +86,36 @@ const STAT_LABEL: Record<string, string> = {
   speed: "Velocidad",
 };
 
+const TYPE_ACCENTS: Record<string, { from: string; to: string; glow: string }> = {
+  normal: { from: "#d7d4af", to: "#a8a97b", glow: "rgba(255,255,255,0.42)" },
+  fire: { from: "#fca65d", to: "#e75932", glow: "rgba(255,184,92,0.46)" },
+  water: { from: "#7ec5ff", to: "#4d7ef5", glow: "rgba(133,214,255,0.45)" },
+  grass: { from: "#9ee88a", to: "#4bb76b", glow: "rgba(166,255,170,0.44)" },
+  electric: { from: "#f9ec7a", to: "#e2b63a", glow: "rgba(255,246,157,0.44)" },
+  ice: { from: "#b5f1ff", to: "#6ecfe8", glow: "rgba(217,248,255,0.48)" },
+  fighting: { from: "#ef6c63", to: "#9a2c2c", glow: "rgba(255,172,166,0.42)" },
+  poison: { from: "#cb88e7", to: "#7c47b8", glow: "rgba(200,170,255,0.42)" },
+  ground: { from: "#e7c66a", to: "#b98d2a", glow: "rgba(247,220,145,0.42)" },
+  flying: { from: "#b5c5ff", to: "#7a86df", glow: "rgba(210,218,255,0.42)" },
+  psychic: { from: "#fbb0d3", to: "#de4f86", glow: "rgba(255,196,224,0.42)" },
+  bug: { from: "#c8d76b", to: "#7ea423", glow: "rgba(210,235,126,0.45)" },
+  rock: { from: "#d5b870", to: "#9d7b2d", glow: "rgba(236,209,122,0.42)" },
+  ghost: { from: "#a48ad5", to: "#56407f", glow: "rgba(208,186,255,0.42)" },
+  dragon: { from: "#8d7cf7", to: "#4d39be", glow: "rgba(175,160,255,0.42)" },
+  dark: { from: "#8f7367", to: "#47372f", glow: "rgba(163,143,136,0.4)" },
+  steel: { from: "#d3d9e7", to: "#7d8da6", glow: "rgba(224,232,244,0.42)" },
+  fairy: { from: "#f5bfd9", to: "#dd7fb1", glow: "rgba(255,215,236,0.4)" },
+};
+
 export function PokedexApp() {
   const [powered, setPowered] = useState(false);
   const [muted, setMutedUi] = useState(false);
+  const [online, setOnline] = useState(true);
+  const [offlineMode, setOfflineMode] = useState(false);
   const [tab, setTab] = useState<Tab>("list");
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(1);
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [onlyFavs, setOnlyFavs] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -71,11 +126,42 @@ export function PokedexApp() {
   const fav = useFavorites();
   const log = useDexLog();
   const searchRef = useRef<HTMLInputElement>(null);
+  const screenScrollRef = useRef<HTMLDivElement>(null);
+  const localOnly = offlineMode || !online;
 
   useEffect(() => {
     setMutedUi(loadMutePref());
     warmupVoices();
+    const syncConnection = () => setOnline(navigator.onLine);
+    syncConnection();
+    window.addEventListener("online", syncConnection);
+    window.addEventListener("offline", syncConnection);
+    try {
+      setOfflineMode(window.localStorage.getItem(OFFLINE_MODE_KEY) === "true");
+    } catch {
+      setOfflineMode(false);
+    }
+    if (import.meta.env.PROD && "serviceWorker" in navigator) {
+      void navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+    return () => {
+      window.removeEventListener("online", syncConnection);
+      window.removeEventListener("offline", syncConnection);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const syncWorkerMode = () => {
+      navigator.serviceWorker.controller?.postMessage({
+        type: "pokedex-offline-mode",
+        enabled: localOnly,
+      });
+    };
+    syncWorkerMode();
+    navigator.serviceWorker.addEventListener("controllerchange", syncWorkerMode);
+    return () => navigator.serviceWorker.removeEventListener("controllerchange", syncWorkerMode);
+  }, [localOnly]);
 
   const suggestions = useMemo(() => suggestCatalog(query), [query]);
 
@@ -94,12 +180,19 @@ export function PokedexApp() {
     setCursor(0);
   }, [typeFilter, onlyFavs, statusFilter]);
 
+  useEffect(() => {
+    if (screenScrollRef.current) screenScrollRef.current.scrollTop = 0;
+  }, [tab, powered]);
+
+  const listViewMode = tab === "list";
+  const lcdSelectedId = listViewMode ? null : selectedId;
   const lcdName =
-    selectedId != null
-      ? CATALOG.find((p) => p.id === selectedId)?.nameEs ?? ""
+    lcdSelectedId != null
+      ? CATALOG.find((p) => p.id === lcdSelectedId)?.nameEs ?? ""
       : "";
 
   function openPokemon(id: number) {
+    stopCry();
     setError(null);
     setSelectedId(id);
     log.markSeen(id);
@@ -109,6 +202,7 @@ export function PokedexApp() {
   }
 
   function openCompare(left: number, right?: number) {
+    stopCry();
     log.markSeen(left);
     setVsLeft(left);
     setVsRight(right ?? null);
@@ -119,6 +213,7 @@ export function PokedexApp() {
   }
 
   function goTab(next: Tab) {
+    stopCry();
     playClick();
     if (next !== "quiz") stopLoop();
     setTab(next);
@@ -143,6 +238,10 @@ export function PokedexApp() {
       openPokemon(hit.id);
       return;
     }
+    if (localOnly) {
+      setError("Sin conexión, solo puedes buscar en los 151 Pokémon de Kanto.");
+      return;
+    }
     setTab("detail");
     setSelectedId(null);
     void lookupUnknown(q);
@@ -164,6 +263,7 @@ export function PokedexApp() {
     playBoot();
     speakDex("Pokédex de Kanto lista. Ciento cincuenta y un Pokémon.");
     log.revealAll();
+    setSelectedId((current) => current ?? 1);
     setPowered(true);
   }
 
@@ -171,6 +271,17 @@ export function PokedexApp() {
     const next = !isMuted();
     setMuted(next);
     setMutedUi(next);
+  }
+
+  function toggleOfflineMode() {
+    const next = !offlineMode;
+    setOfflineMode(next);
+    try {
+      window.localStorage.setItem(OFFLINE_MODE_KEY, String(next));
+    } catch {
+      // The current session can still use local data without persisting the preference.
+    }
+    playClick();
   }
 
   function stepDex(delta: number) {
@@ -210,6 +321,7 @@ export function PokedexApp() {
   }
 
   function powerOff() {
+    stopCry();
     stopLoop();
     stopSpeak();
     setPowered(false);
@@ -217,7 +329,7 @@ export function PokedexApp() {
 
   return (
     <div className="dex-stage">
-      <div className="w-full max-w-[920px]">
+      <div className="w-full max-w-230">
         <div className="dex-unit">
           <section className="dex-panel dex-left">
             <div className="dex-left-head">
@@ -241,7 +353,7 @@ export function PokedexApp() {
                 <span className="dex-bezel-dot" />
               </div>
               <div className="dex-bezel-inner">
-                <div className="dex-screen dex-screen-scroll screen-in p-3 text-pk-ink">
+                <div ref={screenScrollRef} className="dex-screen dex-screen-scroll screen-in p-3 text-pk-ink">
                   {!powered ? (
                     <BootScreen onPower={powerOn} />
                   ) : (
@@ -277,10 +389,12 @@ export function PokedexApp() {
                           onCompare={(id) => openCompare(id)}
                           fav={fav}
                           log={log}
+                          offlineMode={localOnly}
                         />
                       )}
-                      {tab === "quiz" && <QuizView onOpen={openPokemon} />}
-                      {tab === "ai" && <AiView selectedId={selectedId} />}
+                      {tab === "quiz" && <QuizView onOpen={openPokemon} offlineMode={localOnly} />}
+                      {tab === "game" && <GameView log={log} muted={muted} offlineMode={localOnly} onMenu={() => goTab("list")} />}
+                      {tab === "ai" && <AiView selectedId={selectedId} offlineMode={localOnly} />}
                       {tab === "compare" && (
                         <CompareView
                           leftId={vsLeft}
@@ -288,6 +402,7 @@ export function PokedexApp() {
                           setLeftId={setVsLeft}
                           setRightId={setVsRight}
                           onOpen={openPokemon}
+                          offlineMode={localOnly}
                         />
                       )}
                     </>
@@ -305,30 +420,10 @@ export function PokedexApp() {
               <div className="dex-dpad" aria-label="Cruz de dirección">
                 <span className="dex-dpad-arm dex-dpad-ud" />
                 <span className="dex-dpad-arm dex-dpad-lr" />
-                <button
-                  type="button"
-                  className="dex-dpad-btn up"
-                  aria-label="Arriba"
-                  onClick={() => movePad("up")}
-                />
-                <button
-                  type="button"
-                  className="dex-dpad-btn down"
-                  aria-label="Abajo"
-                  onClick={() => movePad("down")}
-                />
-                <button
-                  type="button"
-                  className="dex-dpad-btn left"
-                  aria-label="Izquierda"
-                  onClick={() => movePad("left")}
-                />
-                <button
-                  type="button"
-                  className="dex-dpad-btn right"
-                  aria-label="Derecha"
-                  onClick={() => movePad("right")}
-                />
+                <button type="button" className="dex-dpad-btn up" aria-label="Arriba" onClick={() => movePad("up")} />
+                <button type="button" className="dex-dpad-btn down" aria-label="Abajo" onClick={() => movePad("down")} />
+                <button type="button" className="dex-dpad-btn left" aria-label="Izquierda" onClick={() => movePad("left")} />
+                <button type="button" className="dex-dpad-btn right" aria-label="Derecha" onClick={() => movePad("right")} />
               </div>
             </div>
           </section>
@@ -337,127 +432,90 @@ export function PokedexApp() {
 
           <section className="dex-panel dex-right">
             <div className="dex-lcd" aria-live="polite">
-              <span>
-                {powered
-                  ? selectedId
-                    ? `Nº ${padDex(selectedId)}`
-                    : "KANTO · 151"
-                  : "OFF"}
-              </span>
-              <span>
-                {powered ? lcdName || tabLabel(tab) : "Pulsa el botón verde"}
-              </span>
+              <span>{powered ? (lcdSelectedId ? `Nº ${padDex(lcdSelectedId)}` : "KANTO · 151") : "OFF"}</span>
+              <span>{powered ? lcdName || (listViewMode ? "Índice" : tabLabel(tab)) : "Pulsa el botón verde"}</span>
+            </div>
+            <div className={cn("dex-connection-indicator", localOnly && "is-local")} aria-live="polite">
+              <span className="dex-connection-dot" aria-hidden="true" />
+              {localOnly ? (online ? "MODO LOCAL" : "SIN RED · LOCAL") : "EN LÍNEA"}
             </div>
             <div className="dex-blue-pad">
               {(
                 [
-                  ["list", "LISTA"],
-                  ["detail", "FICHA"],
-                  ["quiz", "SOMBRA"],
-                  ["ai", "IA"],
+                  ["list", "LISTA", "☰"],
+                  ["detail", "FICHA", "▢"],
+                  ["quiz", "SOMBRA", "👻"],
+                  ["game", "BATALLA", "⚔"],
                 ] as const
-              ).map(([id, label]) => (
+              ).map(([id, label, icon]) => (
                 <button
                   key={id}
                   type="button"
                   className={cn("btn-press", tab === id && powered && "is-on")}
-                  onClick={() => {
-                    if (!powered) {
-                      powerOn();
-                      return;
-                    }
-                    goTab(id);
-                  }}
+                  onClick={() => (!powered ? powerOn() : goTab(id))}
                 >
-                  {label}
+                  <span className="dex-key-icon" aria-hidden>
+                    {icon}
+                  </span>
+                  <span>{label}</span>
                 </button>
               ))}
               <button
                 type="button"
                 className="btn-press"
-                onClick={() => {
-                  if (selectedId) {
-                    playCry(
-                      `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${selectedId}.ogg`,
-                    );
-                  }
-                }}
+                disabled={tab === "list" || !selectedId || localOnly}
+                onClick={() =>
+                  selectedId &&
+                  playCry(
+                    `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${selectedId}.ogg`,
+                  )
+                }
               >
-                GRITO
+                <span className="dex-key-icon" aria-hidden>
+                  📢
+                </span>
+                <span>GRITO</span>
               </button>
               <button
                 type="button"
                 className="btn-press"
-                onClick={() => {
-                  if (selectedId) fav.toggle(selectedId);
-                }}
+                onClick={() => selectedId && fav.toggle(selectedId)}
               >
-                FAV
+                <span className="dex-key-icon" aria-hidden>
+                  ★
+                </span>
+                <span>FAV</span>
               </button>
               <button
                 type="button"
                 className="btn-press"
-                onClick={() => {
-                  if (!powered) {
-                    powerOn();
-                    return;
-                  }
-                  openPokemon(Math.floor(Math.random() * MAX_DEX) + 1);
-                }}
+                onClick={() =>
+                  !powered ? powerOn() : openPokemon(Math.floor(Math.random() * MAX_DEX) + 1)
+                }
               >
-                DADO
+                <span className="dex-key-icon" aria-hidden>
+                  🎲
+                </span>
+                <span>DADO</span>
               </button>
               <button type="button" className="btn-press" onClick={toggleMute}>
-                {muted ? "MUTE" : "SONIDO"}
+                <span className="dex-key-icon" aria-hidden>
+                  {muted ? "🔇" : "🔊"}
+                </span>
+                <span>{muted ? "MUTE" : "SONIDO"}</span>
               </button>
             </div>
             <div className="dex-right-mid">
               <div className="dex-white-pair">
-                <button
-                  type="button"
-                  className="dex-white-key btn-press"
-                  aria-label="Anterior"
-                  onClick={() => stepDex(-1)}
-                >
-                  Prev
-                </button>
-                <button
-                  type="button"
-                  className="dex-white-key btn-press"
-                  aria-label="Siguiente"
-                  onClick={() => stepDex(1)}
-                >
-                  Next
-                </button>
+                <button type="button" className="dex-white-key btn-press" aria-label="Anterior" onClick={() => stepDex(-1)}>Prev</button>
+                <button type="button" className="dex-white-key btn-press" aria-label="Siguiente" onClick={() => stepDex(1)}>Next</button>
               </div>
-              <button
-                type="button"
-                className="dex-yellow btn-press"
-                aria-label={powered ? "Apagar" : "Encender"}
-                onClick={() => (powered ? powerOff() : powerOn())}
-              />
+              <button type="button" className="dex-yellow btn-press" aria-label={powered ? "Apagar" : "Encender"} onClick={() => powered ? powerOff() : powerOn()} />
             </div>
             <div className="dex-black-row">
-              <button
-                type="button"
-                className="dex-black-key btn-press"
-                onClick={() => {
-                  if (!powered) {
-                    powerOn();
-                    return;
-                  }
-                  openCompare(selectedId ?? visible[cursor]?.id ?? 1);
-                }}
-              >
-                VS
-              </button>
-              <button
-                type="button"
-                className="dex-black-key btn-press"
-                onClick={() => (powered ? goTab("ai") : powerOn())}
-              >
-                PROF. DEX
-              </button>
+              <button type="button" className="dex-black-key btn-press" onClick={() => !powered ? powerOn() : openCompare(selectedId ?? visible[cursor]?.id ?? 1)}>VS</button>
+              <button type="button" className="dex-black-key btn-press" onClick={() => !powered ? powerOn() : goTab("ai")}>PROF. DEX</button>
+              <button type="button" className="dex-black-key dex-offline-key btn-press" aria-pressed={offlineMode} onClick={toggleOfflineMode}>{offlineMode ? "USAR RED" : "MODO LOCAL"}</button>
             </div>
           </section>
         </div>
@@ -469,6 +527,7 @@ export function PokedexApp() {
 
 function tabLabel(tab: Tab) {
   if (tab === "quiz") return "¿Quién es ese?";
+  if (tab === "game") return "Juego";
   if (tab === "ai") return "Profesor Dex";
   if (tab === "detail") return "Ficha";
   if (tab === "compare") return "Comparar";
@@ -477,55 +536,31 @@ function tabLabel(tab: Tab) {
 
 function ListView(props: {
   query: string;
-  setQuery: (v: string) => void;
+  setQuery: (value: string) => void;
   error: string | null;
   suggestions: typeof CATALOG;
   suggestOpen: boolean;
-  setSuggestOpen: (v: boolean) => void;
+  setSuggestOpen: (value: boolean) => void;
   searchRef: RefObject<HTMLInputElement | null>;
-  onSearch: (q: string) => void;
+  onSearch: (query: string) => void;
   onPick: (id: number) => void;
   typeFilter: string | null;
-  setTypeFilter: (v: string | null) => void;
+  setTypeFilter: (value: string | null) => void;
   onlyFavs: boolean;
-  setOnlyFavs: (v: boolean) => void;
+  setOnlyFavs: (value: boolean) => void;
   statusFilter: StatusFilter;
-  setStatusFilter: (v: StatusFilter) => void;
+  setStatusFilter: (value: StatusFilter) => void;
   visible: typeof CATALOG;
   fav: ReturnType<typeof useFavorites>;
   log: ReturnType<typeof useDexLog>;
   cursor: number;
 }) {
-  const seenPct = Math.round((props.log.seenCount / MAX_DEX) * 100);
-  const caughtPct = Math.round((props.log.caughtCount / MAX_DEX) * 100);
-
   return (
-    <div>
+    <div className="dex-list-view">
       <div className="mb-3 flex items-end justify-between border-b-2 border-pk-muted pb-2">
-        <h1 className="font-display text-[11px] leading-relaxed text-pk-ink">
-          POKEDEX
-        </h1>
-        <span className="rounded-sm bg-pk-ink px-2 py-1 font-body text-sm text-pk-screen">
-          GEN 1 · 151
-        </span>
+        <h1 className="font-display text-[11px] leading-relaxed text-pk-ink">POKEDEX</h1>
+        <span className="rounded-sm bg-pk-ink px-2 py-1 font-body text-sm text-pk-screen">GEN 1 · 151</span>
       </div>
-
-      <div className="mb-3 space-y-1 rounded-md border-2 border-pk-muted bg-pk-panel px-2 py-2">
-        <p className="font-body text-base">
-          Vistos {props.log.seenCount}/{MAX_DEX} · Capturados{" "}
-          {props.log.caughtCount}/{MAX_DEX}
-        </p>
-        <div className="h-2 overflow-hidden rounded-sm bg-pk-muted">
-          <div className="h-full bg-ok" style={{ width: `${seenPct}%` }} />
-        </div>
-        <div className="h-2 overflow-hidden rounded-sm bg-pk-muted">
-          <div
-            className="h-full bg-pk-red"
-            style={{ width: `${caughtPct}%` }}
-          />
-        </div>
-      </div>
-
       <div className="relative mb-2">
         <div className="flex gap-1">
           <label className="sr-only" htmlFor="dex-search">
@@ -612,9 +647,7 @@ function ListView(props: {
         {(
           [
             ["all", "Todos"],
-            ["seen", "Vistos"],
             ["caught", "Capturados"],
-            ["missing", "Faltan"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -674,7 +707,7 @@ function ListView(props: {
             <div
               key={p.id}
               className={cn(
-                "relative rounded-md border-2 bg-pk-panel p-1.5 text-center transition-transform duration-150 hover:scale-105",
+                "dex-pokemon-tile relative rounded-md border-2 bg-pk-panel p-1.5 text-center transition-transform duration-150 hover:scale-105",
                 i === props.cursor ? "border-pk-ink" : "border-pk-muted",
               )}
             >
@@ -713,7 +746,7 @@ function ListView(props: {
                 <img
                   src={spriteUrl(p.id)}
                   alt={p.nameEs}
-                  className="pixelated mx-auto size-16"
+                  className="pixelated mx-auto size-12"
                   loading="lazy"
                 />
                 <p className="truncate font-body text-base leading-tight">
@@ -736,6 +769,7 @@ function DetailView({
   onCompare,
   fav,
   log,
+  offlineMode,
 }: {
   selectedId: number | null;
   onBack: () => void;
@@ -743,14 +777,11 @@ function DetailView({
   onCompare: (id: number) => void;
   fav: ReturnType<typeof useFavorites>;
   log: ReturnType<typeof useDexLog>;
+  offlineMode: boolean;
 }) {
   const q = useQuery({
-    queryKey: ["pokemon", selectedId],
-    queryFn: async () => {
-      const res = await getPokemonFn({ data: { q: String(selectedId) } });
-      if (!res.ok) throw new Error(res.error);
-      return res.data;
-    },
+    queryKey: ["pokemon", selectedId, offlineMode ? "local" : "network"],
+    queryFn: () => loadPokemonForMode(selectedId ?? 0, offlineMode),
     enabled: selectedId != null,
   });
 
@@ -788,6 +819,7 @@ function DetailView({
           onCatch={() => log.toggleCaught(q.data.id)}
           onOpen={onOpen}
           onCompare={() => onCompare(q.data.id)}
+          offlineMode={offlineMode}
         />
       )}
     </div>
@@ -802,6 +834,7 @@ function PokemonSheet({
   onCatch,
   onOpen,
   onCompare,
+  offlineMode,
 }: {
   p: PokemonDetail;
   isFav: boolean;
@@ -810,17 +843,34 @@ function PokemonSheet({
   onCatch: () => void;
   onOpen: (id: number) => void;
   onCompare: () => void;
+  offlineMode: boolean;
 }) {
   const special = p.abilities.find((a) => !a.hidden) ?? p.abilities[0];
-  const [mode, setMode] = useState<"anim" | "art">("anim");
+  const [mode, setMode] = useState<"anim" | "art" | "3d">("anim");
+  const [isShiny, setIsShiny] = useState(false);
   const [aiNote, setAiNote] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
-  const img = mode === "anim" && p.animated ? p.animated : p.artwork;
+  const img =
+    mode === "anim"
+      ? isShiny
+        ? shinyAnimatedGifUrl(p.id)
+        : p.animated ?? p.artwork
+      : mode === "3d"
+        ? isShiny
+          ? p.model3dShiny || p.model3d
+          : p.model3d || p.artwork
+        : isShiny
+          ? shinyArtworkUrl(p.id)
+          : p.artwork;
   const typeLabel = p.types.map((t) => TYPE_LABELS[t] ?? t).join(" y ");
+  const accent = TYPE_ACCENTS[p.types[0]] ?? TYPE_ACCENTS.normal;
+  const heroStyle = {
+    background: `radial-gradient(circle at top, ${accent.glow}, transparent 34%), linear-gradient(135deg, ${accent.from} 0%, ${accent.to} 100%)`,
+  } as const;
 
   useEffect(() => {
     playDexOpen();
-    playCry(p.cry);
+    if (!offlineMode) playCry(p.cry);
     speakDex(
       `Pokémon número ${p.id}. ${p.nameEs}. Tipo ${typeLabel}.`,
     );
@@ -828,9 +878,13 @@ function PokemonSheet({
     return () => {
       stopSpeak();
     };
-  }, [p.id, p.cry, p.nameEs, typeLabel]);
+  }, [p.id, p.cry, p.nameEs, typeLabel, offlineMode]);
 
   async function analyze() {
+    if (offlineMode) {
+      setAiNote("El análisis IA requiere conexión.");
+      return;
+    }
     setAiBusy(true);
     const res = await askDexFn({
       data: {
@@ -856,53 +910,103 @@ function PokemonSheet({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col items-center">
-        <div className="flex size-40 items-center justify-center rounded-lg border-4 border-pk-muted bg-pk-panel">
-          <img
-            src={img}
-            alt={p.nameEs}
-            className={cn(
-              "sprite-idle max-h-36 max-w-36",
-              mode === "anim" && "pixelated",
-            )}
-          />
+      <div className="pokemon-sheet-shell" style={heroStyle}>
+        <div className="pokemon-sheet-header">
+          <span className="pokemon-sheet-badge">Nº {padDex(p.id)}</span>
+          <span className="pokemon-sheet-tracker">{TYPE_LABELS[p.types[0]] ?? p.types[0]}</span>
         </div>
-        <div className="mt-2 flex gap-1">
-          <button
-            type="button"
-            onClick={() => setMode("anim")}
-            className={cn(
-              "rounded-full px-3 py-1 font-body text-base",
-              mode === "anim" ? "bg-pk-ink text-pk-screen" : "bg-pk-panel",
+
+        <div className="pokemon-portrait-room">
+          <div className="pokemon-portrait-frame">
+            {mode === "3d" ? (
+              <div className="dex-3d-scene dex-3d-clean">
+                <img
+                  src={img}
+                  alt={isShiny ? `${p.nameEs} shiny` : p.nameEs}
+                  className="dex-3d-clean-image h-40 w-40 object-contain"
+                  onError={(event) => {
+                    if (event.currentTarget.src !== spriteUrl(p.id)) event.currentTarget.src = spriteUrl(p.id);
+                  }}
+                />
+              </div>
+            ) : (
+              <img
+                src={img}
+                alt={isShiny ? `${p.nameEs} shiny` : p.nameEs}
+                className={cn(
+                  mode === "anim"
+                    ? "sprite-idle h-38 w-38 object-contain pixelated"
+                    : "sprite-idle h-48 w-48 object-contain",
+                )}
+                onError={(event) => {
+                  if (event.currentTarget.src !== spriteUrl(p.id)) event.currentTarget.src = spriteUrl(p.id);
+                }}
+              />
             )}
-          >
-            Sprite
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("art")}
-            className={cn(
-              "rounded-full px-3 py-1 font-body text-base",
-              mode === "art" ? "bg-pk-ink text-pk-screen" : "bg-pk-panel",
-            )}
-          >
-            Arte
-          </button>
+          </div>
         </div>
-        <p className="mt-2 font-body text-lg text-pk-muted">Nº {padDex(p.id)}</p>
-        <h2 className="font-display text-[13px] leading-relaxed">{p.nameEs}</h2>
-        <div className="mt-2 flex gap-1">
-          {p.types.map((t) => (
-            <TypeBadge key={t} type={t} />
-          ))}
+
+        <div className="pokemon-title-wrap">
+          <div>
+            <p className="pokemon-subtitle">Ficha de Kanto</p>
+            <h2 className="font-display text-[13px] leading-relaxed">{p.nameEs}</h2>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {p.types.map((t) => (
+              <TypeBadge key={t} type={t} />
+            ))}
+          </div>
         </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap justify-center gap-1">
+        <button
+          type="button"
+          onClick={() => setMode("anim")}
+          className={cn(
+            "rounded-full px-3 py-1 font-body text-base",
+            mode === "anim" ? "bg-pk-ink text-pk-screen" : "bg-pk-panel",
+          )}
+        >
+          Sprite
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("art")}
+          className={cn(
+            "rounded-full px-3 py-1 font-body text-base",
+            mode === "art" ? "bg-pk-ink text-pk-screen" : "bg-pk-panel",
+          )}
+        >
+          Arte
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("3d")}
+          className={cn(
+            "rounded-full px-3 py-1 font-body text-base",
+            mode === "3d" ? "bg-pk-ink text-pk-screen" : "bg-pk-panel",
+          )}
+        >
+          3D
+        </button>
+        <button
+          type="button"
+          onClick={() => setIsShiny((v) => !v)}
+          className={cn(
+            "rounded-full px-3 py-1 font-body text-base",
+            isShiny ? "bg-yellow-400 text-black" : "bg-pk-panel text-pk-ink",
+          )}
+        >
+          {isShiny ? "Shiny" : "Normal"}
+        </button>
       </div>
 
       <div className="flex gap-2">
         <button
           type="button"
           onClick={() => {
-            playCry(p.cry);
+            if (!offlineMode) playCry(p.cry);
             speakDex(`${p.nameEs}. Tipo ${typeLabel}. ${p.description}`);
           }}
           className="btn-press inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-md bg-pk-red font-body text-lg text-pk-paper"
@@ -945,7 +1049,7 @@ function PokemonSheet({
       <button
         type="button"
         onClick={() => void analyze()}
-        disabled={aiBusy}
+        disabled={aiBusy || offlineMode}
         className="btn-press inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-pk-ink font-body text-lg text-pk-screen disabled:opacity-60"
       >
         <Bot className="size-4" />
@@ -957,12 +1061,12 @@ function PokemonSheet({
         </p>
       )}
 
-      <p className="rounded-md border-2 border-pk-muted bg-pk-panel px-3 py-2 font-body text-lg leading-snug">
+      <p className="pokemon-flavor-card">
         {p.description}
       </p>
 
       {special && (
-        <div className="rounded-md border-2 border-pk-muted bg-pk-panel px-3 py-2">
+        <div className="pokemon-ability-card">
           <p className="font-body text-sm uppercase tracking-wide text-pk-muted">
             Poder especial
           </p>
@@ -978,8 +1082,8 @@ function PokemonSheet({
       )}
 
       <div className="grid grid-cols-2 gap-2">
-        <InfoCell label="Altura" value={`${p.height} m`} />
-        <InfoCell label="Peso" value={`${p.weight} kg`} />
+        <InfoCell label="Altura" value={p.height == null ? "—" : `${p.height} m`} />
+        <InfoCell label="Peso" value={p.weight == null ? "—" : `${p.weight} kg`} />
         <InfoCell label="Captura" value={String(p.captureRate ?? "—")} />
         <InfoCell
           label="Hábitat"
@@ -991,7 +1095,7 @@ function PokemonSheet({
 
       <MatchupBlock types={p.types} />
 
-      <div>
+      <div className="pokemon-stats-panel">
         <h3 className="mb-1 font-body text-lg text-pk-muted">Estadísticas</h3>
         {p.stats.map((s) => (
           <div key={s.name} className="mb-1 flex items-center gap-2">
@@ -1034,7 +1138,7 @@ function PokemonSheet({
 
 function InfoCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border-2 border-pk-muted bg-pk-panel px-2 py-2">
+    <div className="pokemon-stat-tile">
       <p className="font-body text-sm uppercase text-pk-muted">{label}</p>
       <p className="font-body text-lg">{value}</p>
     </div>
@@ -1049,7 +1153,7 @@ function MatchupBlock({ types }: { types: string[] }) {
     { title: "Inmune", items: m.immune },
   ];
   return (
-    <div>
+    <div className="pokemon-matchup-shell">
       <h3 className="mb-1 font-body text-lg text-pk-muted">Tipos rivales</h3>
       {rows.map((row) =>
         row.items.length === 0 ? null : (
@@ -1076,30 +1180,24 @@ function CompareView({
   setLeftId,
   setRightId,
   onOpen,
+  offlineMode,
 }: {
   leftId: number | null;
   rightId: number | null;
   setLeftId: (id: number) => void;
   setRightId: (id: number) => void;
   onOpen: (id: number) => void;
+  offlineMode: boolean;
 }) {
   const [pick, setPick] = useState("");
   const leftQ = useQuery({
-    queryKey: ["pokemon", leftId],
-    queryFn: async () => {
-      const res = await getPokemonFn({ data: { q: String(leftId) } });
-      if (!res.ok) throw new Error(res.error);
-      return res.data;
-    },
+    queryKey: ["pokemon", leftId, offlineMode ? "local" : "network"],
+    queryFn: () => loadPokemonForMode(leftId ?? 0, offlineMode),
     enabled: leftId != null,
   });
   const rightQ = useQuery({
-    queryKey: ["pokemon", rightId],
-    queryFn: async () => {
-      const res = await getPokemonFn({ data: { q: String(rightId) } });
-      if (!res.ok) throw new Error(res.error);
-      return res.data;
-    },
+    queryKey: ["pokemon", rightId, offlineMode ? "local" : "network"],
+    queryFn: () => loadPokemonForMode(rightId ?? 0, offlineMode),
     enabled: rightId != null,
   });
 
@@ -1116,7 +1214,7 @@ function CompareView({
   const statNames = a?.stats.map((s) => s.name) ?? [];
 
   return (
-    <div>
+    <div className="dex-compare-view">
       <h2 className="mb-2 font-display text-[10px] leading-relaxed">
         Comparar
       </h2>
@@ -1237,7 +1335,7 @@ function CompareSlot({
       <img
         src={p.animated ?? p.sprite}
         alt={p.nameEs}
-        className="pixelated mx-auto size-16"
+        className="pixelated mx-auto size-12"
       />
       <p className="font-body text-lg">{p.nameEs}</p>
       <div className="mt-1 flex justify-center gap-1">
@@ -1282,7 +1380,7 @@ function EvolutionRow({
                   <img
                     src={spriteUrl(node.id)}
                     alt=""
-                    className="pixelated size-10"
+                    className="pixelated size-14"
                   />
                   <span className="text-left">
                     <span className="block font-body text-base leading-tight">
@@ -1306,8 +1404,10 @@ function EvolutionRow({
 
 function QuizView({
   onOpen,
+  offlineMode,
 }: {
   onOpen: (id: number) => void;
+  offlineMode: boolean;
 }) {
   const [guess, setGuess] = useState("");
   const [revealed, setRevealed] = useState(false);
@@ -1318,8 +1418,15 @@ function QuizView({
   const [hintBusy, setHintBusy] = useState(false);
 
   const q = useQuery({
-    queryKey: ["quiz", seed],
-    queryFn: () => getQuizFn(),
+    queryKey: ["quiz", seed, offlineMode],
+    queryFn: async () => {
+      if (offlineMode) return getLocalQuiz();
+      try {
+        return await getQuizFn();
+      } catch {
+        return getLocalQuiz();
+      }
+    },
   });
 
   useEffect(() => {
@@ -1365,9 +1472,11 @@ function QuizView({
     );
     if (hit) {
       playCorrectSfx();
-      playCry(
-        `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${p.id}.ogg`,
-      );
+      if (!offlineMode) {
+        playCry(
+          `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${p.id}.ogg`,
+        );
+      }
       speakDex(`¡Correcto! Es ${p.nameEs}.`);
     } else {
       playWrongSfx();
@@ -1385,27 +1494,29 @@ function QuizView({
     });
     setHintBusy(false);
     if (res.ok) {
-      setHint(res.text);
-      speakDex(res.text);
+      const cleanText = res.text.replace(/^Pista\s*:\s*/i, "");
+      setHint(cleanText);
+      speakDex(cleanText);
     } else {
-      setHint(res.error);
+      setHint(res.error.replace(/^Pista\s*:\s*/i, ""));
     }
   }
 
   const p = q.data;
+  const hintText = hint ? hint.replace(/^Pista\s*:\s*/i, "") : "";
 
   return (
-    <div>
+    <div className="dex-quiz-view">
       <h2 className="mb-3 text-center font-display text-[11px] leading-relaxed">
         ¿Quién es ese Pokémon?
       </h2>
-      <div className="quiz-stage mx-auto mb-4 flex size-44 items-center justify-center rounded-lg border-4 border-pk-muted">
+      <div className="quiz-stage quiz-portrait mx-auto mb-4 flex size-44 items-center justify-center rounded-lg border-4 border-pk-muted">
         {p ? (
           <img
             src={p.sprite}
             alt={revealed ? p.nameEs : "Silueta"}
             className={cn(
-              "max-h-40 max-w-40",
+              "max-h-72 max-w-72",
               revealed ? "revealed" : "silhouette",
             )}
           />
@@ -1463,10 +1574,11 @@ function QuizView({
         </p>
       )}
 
-      {hint && (
-        <p className="mb-2 rounded-md border-2 border-pk-muted bg-pk-panel px-3 py-2 font-body text-lg leading-snug">
-          Pista: {hint}
-        </p>
+      {hintText && (
+        <div className="quiz-hint mb-2">
+          <span className="quiz-hint-label">Pista</span>
+          <p className="quiz-hint-text">{hintText}</p>
+        </div>
       )}
 
       <div className="mb-3 flex gap-2">
@@ -1492,9 +1604,11 @@ function QuizView({
             setResult(null);
             stopLoop();
             if (p) {
-              playCry(
-                `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${p.id}.ogg`,
-              );
+              if (!offlineMode) {
+                playCry(
+                  `https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${p.id}.ogg`,
+                );
+              }
               speakDex(`Es ${p.nameEs}.`);
             }
           }}
@@ -1513,7 +1627,7 @@ function QuizView({
           Ver ficha
         </button>
       )}
-      <p className="text-center font-body text-lg text-pk-muted">
+      <p className="quiz-score text-center font-body text-lg text-pk-muted">
         Aciertos {score.ok} · Fallos {score.bad}
       </p>
     </div>
@@ -1522,39 +1636,702 @@ function QuizView({
 
 function BootScreen({ onPower }: { onPower: () => void }) {
   return (
-    <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
-      <p className="font-display text-[11px] leading-relaxed">POKéDEX</p>
-      <p className="mt-2 font-body text-xl text-pk-muted">Kanto · 151</p>
-      <p className="mt-6 max-w-[16rem] font-body text-lg leading-snug">
-        Pulsa para encender el audio: gritos, voz de la Pokédex y el reto de la silueta.
+    <div className="dex-boot-screen flex min-h-70 flex-col items-center justify-center text-center px-4">
+      <div className="dex-boot-pokeball" aria-hidden />
+      <p className="font-display text-[13px] leading-relaxed tracking-wide text-[#c42b2b]">
+        Pokémon
+      </p>
+      <p className="font-display text-[13px] leading-relaxed tracking-wide text-[#c42b2b]">
+        Rojo y Verde
+      </p>
+      <p className="mt-2 font-body text-xl text-pk-muted">Kanto - 151</p>
+      <p className="mt-5 max-w-[17rem] font-body text-lg leading-snug text-pk-ink">
+        Elige la versión y entra en la región de Kanto.
       </p>
       <button
         type="button"
         onClick={onPower}
-        className="btn-press mt-6 h-12 rounded-md bg-pk-ink px-6 font-body text-xl text-pk-screen"
+        className="btn-press dex-boot-cta mt-5"
       >
-        Encender
+        <span aria-hidden>▶</span> Pokémon Rojo y Pokémon Verde <span aria-hidden>◀</span>
       </button>
+      <div className="dex-boot-year" aria-hidden>
+        <span className="dex-boot-year-ball" /> 1996
+      </div>
     </div>
   );
 }
 
+function GameView({
+  log,
+  muted,
+  offlineMode,
+  onMenu,
+}: {
+  log: ReturnType<typeof useDexLog>;
+  muted: boolean;
+  offlineMode: boolean;
+  onMenu: () => void;
+}) {
+  const [encounterId, setEncounterId] = useState<number>(16);
+  const [encounterLevel, setEncounterLevel] = useState(5);
+  const [playerId, setPlayerId] = useState(1);
+  const [partyInitialized, setPartyInitialized] = useState(false);
+  const [battleAnimation, setBattleAnimation] = useState<BattleAnimation>("idle");
+  const battleAnimationTimer = useRef<number | null>(null);
+  const [pokemonProgress, setPokemonProgress] = useState<PokemonProgressMap>(loadPokemonProgress);
+  const [playerHp, setPlayerHp] = useState(60);
+  const [enemyHp, setEnemyHp] = useState(30);
+  const [enemyMaxHp, setEnemyMaxHp] = useState(30);
+  const [enemyAttackStage, setEnemyAttackStage] = useState(0);
+  const [enemyDefenseStage, setEnemyDefenseStage] = useState(0);
+  const [message, setMessage] = useState("Un Pokémon salvaje apareció.");
+  const [enemyDefeated, setEnemyDefeated] = useState(false);
+  const [gameOver, setGameOver] = useState(false);
+  const [choosingMove, setChoosingMove] = useState(false);
+  const [bagOpen, setBagOpen] = useState(false);
+  const [partyOpen, setPartyOpen] = useState(false);
+  const [moves, setMoves] = useState<string[]>([]);
+  const [inventory, setInventory] = useState<BattleItem[]>([
+    WORLD_ITEMS[0], WORLD_ITEMS[2], WORLD_ITEMS[3],
+  ]);
+
+  const encounter = CATALOG.find((p) => p.id === encounterId) ?? CATALOG[0];
+  const player = CATALOG.find((pokemon) => pokemon.id === playerId) ?? CATALOG[6];
+  const playerProgress = pokemonProgress[playerId] ?? { level: 5, xp: 0 };
+  const playerLevel = playerProgress.level;
+  const playerXp = playerProgress.xp;
+  const playerMaxHp = 40 + (playerLevel - 1) * 5;
+  const caughtPokemon = CATALOG.filter((pokemon) => log.isCaught(pokemon.id));
+  const teamPokemon = [
+    player,
+    ...caughtPokemon.filter((pokemon) => pokemon.id !== playerId),
+  ].slice(0, PARTY_LIMIT);
+  const reservePokemon = teamPokemon.filter((pokemon) => pokemon.id !== playerId);
+
+  useEffect(() => {
+    if (!log.isLoaded || partyInitialized) return;
+    const firstCaught = CATALOG.find((pokemon) => log.isCaught(pokemon.id));
+    if (firstCaught) {
+      setPlayerId(firstCaught.id);
+      setPlayerHp(40 + ((pokemonProgress[firstCaught.id]?.level ?? 5) - 1) * 5);
+    }
+    setPartyInitialized(true);
+  }, [log, partyInitialized, pokemonProgress]);
+
+  useEffect(() => {
+    if (!partyInitialized) return;
+    if (!offlineMode) {
+      playCry(`https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/${playerId}.ogg`);
+    }
+    return stopCry;
+  }, [offlineMode, partyInitialized, playerId]);
+
+  const playerQuery = useQuery({
+    queryKey: ["pokemon", "battle-player", playerId, offlineMode],
+    queryFn: () => loadPokemonForMode(playerId, offlineMode),
+  });
+  const enemyRatio = Math.max(0, Math.min(100, (enemyHp / enemyMaxHp) * 100));
+  const playerRatio = Math.max(0, Math.min(100, (playerHp / playerMaxHp) * 100));
+  const xpThreshold = playerLevel * 20;
+  const xpRatio = Math.min(100, (playerXp / xpThreshold) * 100);
+  const dangerMusic = playerHp > 0 && playerRatio <= 50;
+
+  useEffect(() => {
+    if (muted || gameOver) {
+      stopLoop();
+      return;
+    }
+    if (dangerMusic) playBattleDangerLoop();
+    else playBattleLoop();
+    return stopLoop;
+  }, [muted, dangerMusic, gameOver]);
+
+  useEffect(() => () => {
+    if (battleAnimationTimer.current != null) {
+      window.clearTimeout(battleAnimationTimer.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    const available = (playerQuery.data?.learnableMoves ?? [])
+      .filter((move) => move.level <= playerLevel)
+      .map((move) => move.name);
+    if (available.length === 0) {
+      setMoves([]);
+      return;
+    }
+    const shuffled = [...new Set(available)];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    const statusMove = shuffled.find((move) => STATUS_MOVE_EFFECTS[move]);
+    setMoves(statusMove
+      ? [statusMove, ...shuffled.filter((move) => move !== statusMove)].slice(0, 4)
+      : shuffled.slice(0, 4));
+  }, [playerQuery.data, playerLevel]);
+
+  function spawnRandomEncounter() {
+    const encounters = CATALOG.filter((pokemon) => pokemon.id !== playerId);
+    const next = encounters[Math.floor(Math.random() * encounters.length)];
+    const nextLevel = Math.max(1, playerLevel + Math.floor(Math.random() * 5) - 2);
+    const nextHp = 26 + (next.id % 12) * 3;
+    setEncounterId(next.id);
+    setEncounterLevel(nextLevel);
+    setEnemyHp(nextHp);
+    setEnemyMaxHp(nextHp);
+    setEnemyAttackStage(0);
+    setEnemyDefenseStage(0);
+    setEnemyDefeated(false);
+    setChoosingMove(false);
+    setBagOpen(false);
+    setPartyOpen(false);
+    setMessage(`¡${next.nameEs} salvaje apareció!`);
+    return next;
+  }
+
+  function awardExperience() {
+    const levelGap = Math.max(0, encounterLevel - playerLevel);
+    const levelBonus = levelGap >= 3 ? levelGap * 4 : 0;
+    const gained = 4 + encounterLevel * 3 + levelBonus;
+    let remainingXp = playerXp + gained;
+    let nextLevel = playerLevel;
+    while (remainingXp >= nextLevel * 20) {
+      remainingXp -= nextLevel * 20;
+      nextLevel += 1;
+    }
+    const levelsGained = nextLevel - playerLevel;
+    let evolvedPokemonId = playerId;
+    let evolvedPokemonName: string | null = null;
+    const evolutionChain = playerQuery.data?.evolution ?? [];
+    for (let level = playerLevel + 1; level <= nextLevel; level += 1) {
+      const evolution = findLevelEvolution(evolutionChain, evolvedPokemonId, level);
+      if (evolution) {
+        evolvedPokemonId = evolution.id;
+        evolvedPokemonName = CATALOG.find((pokemon) => pokemon.id === evolution.id)?.nameEs ?? evolution.name;
+      }
+    }
+    const nextProgress = {
+      ...pokemonProgress,
+      [playerId]: { level: nextLevel, xp: remainingXp },
+      [evolvedPokemonId]: { level: nextLevel, xp: remainingXp },
+    };
+    setPokemonProgress(nextProgress);
+    savePokemonProgress(nextProgress);
+    if (evolvedPokemonId !== playerId) {
+      const evolved = CATALOG.find((pokemon) => pokemon.id === evolvedPokemonId);
+      setPlayerId(evolvedPokemonId);
+      setMoves([]);
+      log.markSeen(evolvedPokemonId);
+      if (!log.isCaught(evolvedPokemonId)) log.toggleCaught(evolvedPokemonId);
+      evolvedPokemonName = evolved?.nameEs ?? "su siguiente etapa";
+    }
+    if (levelsGained > 0) {
+      setPlayerHp((current) => current + levelsGained * 5);
+    }
+    setMessage(
+      `¡${encounter.nameEs} cayó! ${player.nameEs} ganó ${gained} EXP${levelsGained > 0 ? ` y subió al nivel ${nextLevel}` : ""}${evolvedPokemonName ? ` y evolucionó a ${evolvedPokemonName}` : ""}.`,
+    );
+    return { pokemonId: evolvedPokemonId, progress: nextProgress };
+  }
+
+  function evolvePokemon(
+    evolution: EvolutionNode,
+    fromId: number,
+    sourceProgress: PokemonProgressMap = pokemonProgress,
+    itemIndex?: number,
+  ) {
+    const progress = sourceProgress[fromId] ?? pokemonProgress[fromId] ?? { level: 5, xp: 0 };
+    const nextProgress = { ...sourceProgress, [evolution.id]: progress };
+    const fromPokemon = CATALOG.find((pokemon) => pokemon.id === fromId);
+    const toPokemon = CATALOG.find((pokemon) => pokemon.id === evolution.id);
+    setPokemonProgress(nextProgress);
+    savePokemonProgress(nextProgress);
+    setPlayerId(evolution.id);
+    setMoves([]);
+    if (battleAnimationTimer.current != null) window.clearTimeout(battleAnimationTimer.current);
+    setBattleAnimation("player-switch");
+    battleAnimationTimer.current = window.setTimeout(() => {
+      setBattleAnimation("idle");
+      battleAnimationTimer.current = null;
+    }, 420);
+    if (itemIndex != null) {
+      setInventory((current) => current.filter((_, index) => index !== itemIndex));
+    }
+    log.markSeen(evolution.id);
+    if (!log.isCaught(evolution.id)) log.toggleCaught(evolution.id);
+    setMessage(`¡${fromPokemon?.nameEs ?? player.nameEs} evolucionó a ${toPokemon?.nameEs ?? evolution.name}!`);
+    return nextProgress;
+  }
+
+  function animateBattleSequence(sequence: BattleAnimationStep[]) {
+    if (battleAnimationTimer.current != null) {
+      window.clearTimeout(battleAnimationTimer.current);
+    }
+    let stepIndex = 0;
+    const playNextStep = () => {
+      const step = sequence[stepIndex];
+      if (!step) {
+        if (sequence.at(-1)?.action !== "flee") setBattleAnimation("idle");
+        battleAnimationTimer.current = null;
+        return;
+      }
+      setBattleAnimation(step.action);
+      battleAnimationTimer.current = window.setTimeout(() => {
+        stepIndex += 1;
+        playNextStep();
+      }, step.duration);
+    };
+    playNextStep();
+  }
+
+  function attack(move: string) {
+    if (enemyDefeated || gameOver || playerHp <= 0 || battleAnimation !== "idle") return;
+    setChoosingMove(false);
+    playBattleAttack();
+    const moveEffect = STATUS_MOVE_EFFECTS[move];
+    let playerTurnMessage: string;
+    let nextEnemy = enemyHp;
+    let effectiveEnemyAttackStage = enemyAttackStage;
+
+    if (moveEffect) {
+      const currentStage = moveEffect.stat === "attack" ? enemyAttackStage : enemyDefenseStage;
+      if (currentStage > -6) {
+        const nextStage = Math.max(-6, currentStage - moveEffect.stages);
+        if (moveEffect.stat === "attack") {
+          setEnemyAttackStage(nextStage);
+          effectiveEnemyAttackStage = nextStage;
+        }
+        else setEnemyDefenseStage(nextStage);
+        playerTurnMessage = `¡${formatMoveName(move)}! El ${moveEffect.label} de ${encounter.nameEs} bajó.`;
+      } else {
+        playerTurnMessage = `¡${formatMoveName(move)}! ${encounter.nameEs} no puede bajar más su ${moveEffect.label}.`;
+      }
+      animateBattleSequence([
+        { action: "player-attack", duration: 300 },
+        { action: "enemy-debuff", duration: 220 },
+        { action: "enemy-attack", duration: 300 },
+        { action: "player-hit", duration: 220 },
+      ]);
+    } else {
+      const baseDamage = 8 + Math.floor(Math.random() * 14);
+      const damage = Math.max(1, Math.floor(baseDamage / stageMultiplier(enemyDefenseStage)));
+      nextEnemy = Math.max(0, enemyHp - damage);
+      setEnemyHp(nextEnemy);
+      playBattleHit();
+
+      if (nextEnemy <= 0) {
+        animateBattleSequence([
+          { action: "player-attack", duration: 300 },
+          { action: "enemy-hit", duration: 280 },
+        ]);
+        setEnemyDefeated(true);
+        const item = Math.random() < 0.18
+          ? EVOLUTION_STONES[Math.floor(Math.random() * EVOLUTION_STONES.length)]
+          : WORLD_ITEMS[Math.floor(Math.random() * WORLD_ITEMS.length)];
+        const reward = awardExperience();
+        const itemEvolution = item.effect === "evolution"
+          ? findItemEvolution(playerQuery.data?.evolution ?? [], reward.pokemonId, item.method)
+          : undefined;
+        if (itemEvolution) {
+          evolvePokemon(itemEvolution, reward.pokemonId, reward.progress);
+          setMessage(`¡${encounter.nameEs} dejó caer ${item.name}! ¡${player.nameEs} evolucionó a ${itemEvolution.name}!`);
+        } else {
+          setInventory((current) => [...current, item]);
+          setMessage((current) => `${current} Dejó caer: ${item.name}.`);
+        }
+        return;
+      }
+
+      playerTurnMessage = `¡${formatMoveName(move)}! ${encounter.nameEs} recibió ${damage} PS de daño.`;
+      animateBattleSequence([
+        { action: "player-attack", duration: 300 },
+        { action: "enemy-hit", duration: 220 },
+        { action: "enemy-attack", duration: 300 },
+        { action: "player-hit", duration: 220 },
+      ]);
+    }
+
+    playBattleHit();
+    const enemyDamage = 5 + Math.floor(Math.random() * 10);
+    const reducedEnemyDamage = Math.max(1, Math.floor(enemyDamage * stageMultiplier(effectiveEnemyAttackStage)));
+    const nextPlayerHp = Math.max(0, playerHp - reducedEnemyDamage);
+    setPlayerHp(nextPlayerHp);
+    setMessage(
+      nextPlayerHp === 0
+        ? reservePokemon.length > 0
+          ? `¡${player.nameEs} se debilitó! Elige otro Pokémon.`
+          : `¡${encounter.nameEs} debilitó a ${player.nameEs}! ¡Has perdido!`
+        : `${playerTurnMessage} ¡${encounter.nameEs} contraataca y causa ${reducedEnemyDamage} PS de daño.`,
+    );
+    if (nextPlayerHp === 0) {
+      if (reservePokemon.length > 0) setPartyOpen(true);
+      else setGameOver(true);
+    }
+  }
+
+  function handleBattleItem(itemIndex: number) {
+    const item = inventory[itemIndex];
+    if (!item) return;
+    if (item.effect === "heal" && playerHp < playerMaxHp) {
+      animateBattleSequence([{ action: "player-heal", duration: 650 }]);
+      playBattleHeal();
+      setPlayerHp((current) => Math.min(playerMaxHp, current + item.power));
+      setInventory((current) => current.filter((_, index) => index !== itemIndex));
+      setMessage(`${player.nameEs} usó ${item.name}.`);
+      setBagOpen(false);
+      return;
+    }
+    if (item.effect === "evolution") {
+      const evolution = findItemEvolution(
+        playerQuery.data?.evolution ?? [],
+        playerId,
+        item.method,
+      );
+      if (!evolution) {
+        setMessage(`${player.nameEs} no puede evolucionar con ${item.name}.`);
+        return;
+      }
+      evolvePokemon(evolution, playerId, pokemonProgress, itemIndex);
+      setBagOpen(false);
+      return;
+    }
+    if (item.effect === "catch") {
+      setInventory((current) => current.filter((_, index) => index !== itemIndex));
+      const chance = Math.random() < 0.25 + (1 - enemyHp / enemyMaxHp) * 0.65;
+      if (chance) {
+        const alreadyCaught = log.isCaught(encounter.id);
+        if (!alreadyCaught) log.toggleCaught(encounter.id);
+        setEnemyDefeated(true);
+        const teamFull = teamPokemon.length >= PARTY_LIMIT && !teamPokemon.some((pokemon) => pokemon.id === encounter.id);
+        setMessage(
+          teamFull
+            ? `¡${encounter.nameEs} se registró en la Pokédex! Equipo completo: ${PARTY_LIMIT}/${PARTY_LIMIT}.`
+            : `¡Capturaste a ${encounter.nameEs}! Ya está en tu equipo.`,
+        );
+      } else {
+        setMessage(`¡${encounter.nameEs} escapó de la Poké Ball!`);
+      }
+      setBagOpen(false);
+      return;
+    }
+    if (item.effect === "attract") {
+      setInventory((current) => current.filter((_, index) => index !== itemIndex));
+      const next = spawnRandomEncounter();
+      setMessage(`El cebo atrajo a ${next.nameEs}.`);
+      return;
+    }
+    setMessage(`${item.name}: no se puede usar ahora.`);
+  }
+
+  function flee() {
+    if (enemyDefeated || gameOver) return;
+    animateBattleSequence([{ action: "flee", duration: 650 }]);
+    playBattleFlee();
+    setGameOver(true);
+    setChoosingMove(false);
+    setBagOpen(false);
+    setPartyOpen(false);
+    setMessage("Huiste del combate. La partida terminó.");
+  }
+
+  function restartBattle() {
+    setPlayerHp(playerMaxHp);
+    setGameOver(false);
+    spawnRandomEncounter();
+  }
+
+  function choosePokemon(id: number) {
+    animateBattleSequence([{ action: "player-switch", duration: 420 }]);
+    setPlayerId(id);
+    setPlayerHp(40 + ((pokemonProgress[id]?.level ?? 5) - 1) * 5);
+    setMoves([]);
+    setPartyOpen(false);
+    setMessage(`${CATALOG.find((pokemon) => pokemon.id === id)?.nameEs} entra en combate.`);
+  }
+
+  function continueAfterWin() {
+    const next = spawnRandomEncounter();
+    setMessage(`¡Adelante! Apareció ${next.nameEs}.`);
+  }
+
+  return (
+    <div className="battle-shell">
+      <div className="battle-header">
+        <div className="battle-header__brand">
+          <span className="battle-header__icon" aria-hidden />
+          <span>Pokémon · Kanto</span>
+        </div>
+        <span className="battle-header__team">Equipo {teamPokemon.length}/{PARTY_LIMIT}</span>
+      </div>
+
+      <div className={cn("battle-field", dangerMusic && "battle-field--danger")}>
+        <div className="battle-status battle-status--enemy">
+          <div className="battle-status__heading">
+            <span className="battle-status__name">{encounter.nameEs}</span>
+            <span className="battle-status__level">Lv {encounterLevel}</span>
+          </div>
+          <div className="battle-status__bar battle-status__bar--enemy">
+            <span style={{ width: `${enemyRatio}%` }} />
+          </div>
+        </div>
+
+        <div className={cn(
+          "battle-sprite battle-sprite--left",
+          battleAnimation === "idle" && "battle-sprite--idle",
+          battleAnimation === "player-attack" && "battle-sprite--attacking",
+          battleAnimation === "player-hit" && "battle-sprite--hit",
+          battleAnimation === "player-heal" && "battle-sprite--healing",
+          battleAnimation === "player-switch" && "battle-sprite--switching",
+          battleAnimation === "flee" && "battle-sprite--fleeing",
+        )}>
+          <img
+            src={battleSpriteUrl(playerId, "back")}
+            alt={`${player.nameEs} de espaldas`}
+            className="pixelated"
+            onError={(event) => {
+              event.currentTarget.src = spriteUrl(playerId);
+            }}
+          />
+        </div>
+
+        <div className={cn(
+          "battle-sprite battle-sprite--right",
+          battleAnimation === "idle" && "battle-sprite--idle",
+          battleAnimation === "enemy-attack" && "battle-sprite--attacking",
+          battleAnimation === "enemy-hit" && "battle-sprite--hit",
+          battleAnimation === "enemy-debuff" && "battle-sprite--debuff",
+          battleAnimation === "flee" && "battle-sprite--fleeing",
+        )}>
+          <img
+            src={battleSpriteUrl(encounter.id, "front")}
+            alt={encounter.nameEs}
+            className="pixelated"
+            onError={(event) => {
+              event.currentTarget.src = spriteUrl(encounter.id);
+            }}
+          />
+        </div>
+
+        <div className="battle-status battle-status--player">
+          <div className="battle-status__heading">
+            <span className="battle-status__name">{player.nameEs}</span>
+            <span className="battle-status__level">Lv {playerLevel}</span>
+          </div>
+          <div className={cn(
+            "battle-status__bar battle-status__bar--player",
+            dangerMusic && "battle-status__bar--danger",
+          )}>
+            <span style={{ width: `${playerRatio}%` }} />
+          </div>
+          <div className="battle-status__bar battle-status__bar--xp">
+            <span style={{ width: `${xpRatio}%` }} />
+          </div>
+          <span className="battle-status__hp">{playerHp} / {playerMaxHp} PS · {playerXp}/{xpThreshold} EXP</span>
+        </div>
+      </div>
+
+      <div key={message} className="battle-message">{message}</div>
+
+      {gameOver || (playerHp <= 0 && reservePokemon.length === 0) ? (
+        <div className="battle-actions">
+          <button type="button" onClick={restartBattle} className="btn-press battle-actions__btn battle-actions__btn--primary">Reintentar</button>
+          <button type="button" onClick={onMenu} className="btn-press battle-actions__btn">Ir al menú</button>
+        </div>
+      ) : enemyDefeated ? (
+        <button type="button" onClick={continueAfterWin} className="btn-press battle-actions__btn battle-actions__btn--primary">Continuar</button>
+      ) : bagOpen ? (
+        <div className="battle-inventory">
+          <div className="battle-inventory__heading">
+            <span>Mochila</span>
+            <button type="button" onClick={() => { playClick(); setBagOpen(false); }} aria-label="Cerrar mochila">×</button>
+          </div>
+          {inventory.length === 0 ? (
+            <p>La mochila está vacía.</p>
+          ) : (
+            inventory.map((item, index) => (
+              <button key={`${item.name}-${index}`} type="button" onClick={() => handleBattleItem(index)}>
+                <span>{item.name}</span><span>Usar</span>
+              </button>
+            ))
+          )}
+        </div>
+      ) : partyOpen || playerHp <= 0 ? (
+        <div className="battle-inventory battle-party">
+          <div className="battle-inventory__heading">
+            <span>Equipo {teamPokemon.length}/{PARTY_LIMIT}{playerHp <= 0 ? " · Elige otro" : ""}</span>
+            {playerHp > 0 && <button type="button" onClick={() => { playClick(); setPartyOpen(false); }} aria-label="Cerrar equipo">×</button>}
+          </div>
+          {reservePokemon.length === 0 ? (
+            <p>No quedan compañeros disponibles.</p>
+          ) : (
+            reservePokemon.map((pokemon) => (
+              <button key={pokemon.id} type="button" onClick={() => choosePokemon(pokemon.id)}>
+                <span className="battle-party__entry"><img src={battleSpriteUrl(pokemon.id, "front")} alt="" />{pokemon.nameEs}</span>
+                <span>{pokemon.id === playerId ? "En combate" : "Elegir"}</span>
+              </button>
+            ))
+          )}
+        </div>
+      ) : choosingMove ? (
+        <div className="battle-actions battle-actions--moves">
+          {moves.length > 0 ? moves.map((move) => (
+              <button key={move} type="button" onClick={() => attack(move)} className="btn-press battle-actions__btn">
+                {formatMoveName(move)}
+              </button>
+            )) : (
+              <p className="battle-actions__loading">
+                {playerQuery.isPending ? "Cargando movimientos…" : "No hay movimientos aprendidos a este nivel."}
+              </p>
+            )}
+          <button type="button" onClick={() => { playClick(); setChoosingMove(false); }} className="btn-press battle-actions__back">
+            Volver
+          </button>
+        </div>
+      ) : (
+        <div className="battle-actions">
+          <button type="button" onClick={() => { playClick(); setChoosingMove(true); }} className="btn-press battle-actions__btn battle-actions__btn--primary">
+            Luchar
+          </button>
+          <button type="button" onClick={() => { playClick(); setBagOpen(true); }} className="btn-press battle-actions__btn">
+            Mochila
+          </button>
+          <button type="button" onClick={() => { playClick(); setPartyOpen(true); }} className="btn-press battle-actions__btn">
+            Pokémon
+          </button>
+          <button type="button" onClick={flee} className="btn-press battle-actions__btn">
+            Huir
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type PokemonProgress = { level: number; xp: number };
+type PokemonProgressMap = Record<number, PokemonProgress>;
+type BattleAnimation = "idle" | "player-attack" | "enemy-hit" | "enemy-debuff" | "enemy-attack" | "player-hit" | "player-heal" | "player-switch" | "flee";
+type BattleAnimationStep = {
+  action: Exclude<BattleAnimation, "idle">;
+  duration: number;
+};
+
+const STATUS_MOVE_EFFECTS: Record<string, { stat: "attack" | "defense"; stages: number; label: string }> = {
+  growl: { stat: "attack", stages: 1, label: "ataque" },
+  leer: { stat: "defense", stages: 1, label: "defensa" },
+  "tail-whip": { stat: "defense", stages: 1, label: "defensa" },
+  screech: { stat: "defense", stages: 2, label: "defensa" },
+};
+
+function stageMultiplier(stage: number) {
+  return stage >= 0 ? (2 + stage) / 2 : 2 / (2 - stage);
+}
+
+function findLevelEvolution(chain: EvolutionNode[][], fromId: number, level: number) {
+  return chain.flat().find((evolution) => {
+    if (evolution.fromId !== fromId || !evolution.method) return false;
+    const requiredLevel = evolution.method.match(/^Nv\.\s*(\d+)$/);
+    return requiredLevel != null && Number(requiredLevel[1]) <= level;
+  });
+}
+
+function findItemEvolution(chain: EvolutionNode[][], fromId: number, method: string) {
+  return chain.flat().find(
+    (evolution) => evolution.fromId === fromId && evolution.method === method,
+  );
+}
+
+const BATTLE_PROGRESS_KEY = "pokedex-gen1-battle-progress";
+
+function loadPokemonProgress(): PokemonProgressMap {
+  if (typeof window === "undefined") return {};
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(BATTLE_PROGRESS_KEY) ?? "{}");
+    if (!saved || typeof saved !== "object") return {};
+    const entries = Object.entries(saved).flatMap(([rawId, value]) => {
+      const id = Number(rawId);
+      if (!Number.isInteger(id) || id < 1 || id > MAX_DEX || !value || typeof value !== "object") return [];
+      const progress = value as Record<string, unknown>;
+      if (typeof progress.level !== "number" || typeof progress.xp !== "number") return [];
+      return [[id, {
+        level: Math.max(5, Math.floor(progress.level)),
+        xp: Math.max(0, Math.floor(progress.xp)),
+      }] as const];
+    });
+    return Object.fromEntries(entries) as PokemonProgressMap;
+  } catch {
+    return {};
+  }
+}
+
+function savePokemonProgress(progress: PokemonProgressMap) {
+  try {
+    localStorage.setItem(BATTLE_PROGRESS_KEY, JSON.stringify(progress));
+  } catch {
+    return;
+  }
+}
+
+const WORLD_ITEMS = [
+  { name: "Poción", effect: "heal", power: 20 },
+  { name: "Superpoción", effect: "heal", power: 40 },
+  { name: "Poké Ball", effect: "catch", power: 0 },
+  { name: "Cebo", effect: "attract", power: 0 },
+] as const;
+
+const EVOLUTION_STONES = [
+  { name: "Piedra Fuego", effect: "evolution", method: "fire stone", power: 0 },
+  { name: "Piedra Agua", effect: "evolution", method: "water stone", power: 0 },
+  { name: "Piedra Trueno", effect: "evolution", method: "thunder stone", power: 0 },
+  { name: "Piedra Hoja", effect: "evolution", method: "leaf stone", power: 0 },
+  { name: "Piedra Lunar", effect: "evolution", method: "moon stone", power: 0 },
+] as const;
+
+type BattleItem = (typeof WORLD_ITEMS)[number] | (typeof EVOLUTION_STONES)[number];
+
+function battleSpriteUrl(id: number, side: "front" | "back") {
+  const root = "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-i/red-blue";
+  return side === "back"
+    ? `${root}/transparent/back/${id}.png`
+    : `${root}/transparent/${id}.png`;
+}
+
+function formatMoveName(move: string) {
+  const spanishNames: Record<string, string> = {
+    "water-gun": "Pistola Agua",
+    "tail-whip": "Látigo",
+    growl: "Gruñido",
+    leer: "Malicioso",
+    screech: "Chirrido",
+    "poison-powder": "Polvo Veneno",
+    "razor-leaf": "Hoja Afilada",
+    "take-down": "Derribo",
+    tackle: "Placaje",
+    "bubble": "Burbuja",
+    "quick-attack": "Ataque Rápido",
+    "vine-whip": "Látigo Cepa",
+    "thunder-shock": "Impactrueno",
+    "body-slam": "Golpe Cuerpo",
+    "double-edge": "Doble Filo",
+  };
+  return spanishNames[move] ?? move.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function AiView({
   selectedId,
+  offlineMode,
 }: {
   selectedId: number | null;
+  offlineMode: boolean;
 }) {
   const [question, setQuestion] = useState("");
   const [log, setLog] = useState<{ role: "user" | "dex"; text: string }[]>([]);
   const [busy, setBusy] = useState(false);
 
   const q = useQuery({
-    queryKey: ["pokemon", selectedId],
-    queryFn: async () => {
-      const res = await getPokemonFn({ data: { q: String(selectedId) } });
-      if (!res.ok) throw new Error(res.error);
-      return res.data;
-    },
+    queryKey: ["pokemon", selectedId, offlineMode ? "local" : "network"],
+    queryFn: () => loadPokemonForMode(selectedId ?? 0, offlineMode),
     enabled: selectedId != null,
   });
 
@@ -1563,6 +2340,10 @@ function AiView({
     if (!prompt || busy) return;
     setQuestion("");
     setLog((prev) => [...prev, { role: "user", text: prompt }]);
+    if (offlineMode) {
+      setLog((prev) => [...prev, { role: "dex", text: "El Profesor Dex necesita conexión. El catálogo, las fichas guardadas y los juegos locales siguen disponibles." }]);
+      return;
+    }
     setBusy(true);
     const p = q.data;
     const res = await askDexFn({
@@ -1594,7 +2375,7 @@ function AiView({
   ];
 
   return (
-    <div>
+    <div className="dex-professor-view">
       <h2 className="mb-2 flex items-center gap-2 font-display text-[10px] leading-relaxed">
         <Bot className="size-4" />
         Profesor Dex
@@ -1603,13 +2384,19 @@ function AiView({
         IA de Kanto
         {q.data ? ` · ficha de ${q.data.nameEs}` : " · abre una ficha para más contexto"}
       </p>
+      {offlineMode && (
+        <p className="mb-2 rounded-md border-2 border-pk-muted bg-pk-panel px-3 py-2 font-body text-lg">
+          El Profesor Dex requiere conexión. El resto del catálogo sigue disponible.
+        </p>
+      )}
       <div className="mb-2 flex flex-wrap gap-1">
         {chips.map((c) => (
           <button
             key={c}
             type="button"
+            disabled={offlineMode}
             onClick={() => void send(c)}
-            className="btn-press rounded-full bg-pk-panel px-3 py-1 font-body text-base"
+            className="btn-press rounded-full bg-pk-panel px-3 py-1 font-body text-base disabled:opacity-50"
           >
             {c}
           </button>
@@ -1646,11 +2433,12 @@ function AiView({
             if (e.key === "Enter") void send(question);
           }}
           placeholder="Pregunta a la IA…"
-          className="h-11 flex-1 rounded-md border-2 border-pk-muted bg-pk-panel px-3 font-body text-lg outline-none"
+          disabled={offlineMode}
+          className="h-11 flex-1 rounded-md border-2 border-pk-muted bg-pk-panel px-3 font-body text-lg outline-none disabled:opacity-50"
         />
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || offlineMode}
           onClick={() => void send(question)}
           className="btn-press h-11 rounded-md bg-pk-ink px-3 font-body text-lg text-pk-screen disabled:opacity-50"
         >
