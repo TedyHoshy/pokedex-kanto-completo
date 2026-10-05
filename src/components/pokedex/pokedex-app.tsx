@@ -1681,6 +1681,7 @@ function GameView({
   const battleAnimationTimer = useRef<number | null>(null);
   const [pokemonProgress, setPokemonProgress] = useState<PokemonProgressMap>(loadPokemonProgress);
   const [playerHp, setPlayerHp] = useState(60);
+  const [partyHp, setPartyHp] = useState<Record<number, number>>({});
   const [enemyHp, setEnemyHp] = useState(30);
   const [enemyMaxHp, setEnemyMaxHp] = useState(30);
   const [enemyAttackStage, setEnemyAttackStage] = useState(0);
@@ -1702,20 +1703,39 @@ function GameView({
   const playerLevel = playerProgress.level;
   const playerXp = playerProgress.xp;
   const playerMaxHp = 40 + (playerLevel - 1) * 5;
+  const maxHpFor = (id: number) => {
+    const level = pokemonProgress[id]?.level ?? 5;
+    return 40 + (level - 1) * 5;
+  };
+  const hpOf = (id: number) => {
+    if (partyHp[id] !== undefined) return partyHp[id];
+    return maxHpFor(id);
+  };
+  const isFainted = (id: number) => hpOf(id) <= 0;
   const caughtPokemon = CATALOG.filter((pokemon) => log.isCaught(pokemon.id));
   const teamPokemon = [
     player,
     ...caughtPokemon.filter((pokemon) => pokemon.id !== playerId),
   ].slice(0, PARTY_LIMIT);
+  const aliveTeam = teamPokemon.filter((pokemon) => !isFainted(pokemon.id));
   const reservePokemon = teamPokemon.filter((pokemon) => pokemon.id !== playerId);
+  const aliveReserve = reservePokemon.filter((pokemon) => !isFainted(pokemon.id));
 
   useEffect(() => {
     if (!log.isLoaded || partyInitialized) return;
     const firstCaught = CATALOG.find((pokemon) => log.isCaught(pokemon.id));
+    const initialHp: Record<number, number> = {};
+    for (const poke of CATALOG) {
+      if (log.isCaught(poke.id)) {
+        const level = pokemonProgress[poke.id]?.level ?? 5;
+        initialHp[poke.id] = 40 + (level - 1) * 5;
+      }
+    }
     if (firstCaught) {
       setPlayerId(firstCaught.id);
-      setPlayerHp(40 + ((pokemonProgress[firstCaught.id]?.level ?? 5) - 1) * 5);
+      setPlayerHp(initialHp[firstCaught.id] ?? 60);
     }
+    setPartyHp(initialHp);
     setPartyInitialized(true);
   }, [log, partyInitialized, pokemonProgress]);
 
@@ -1828,7 +1848,11 @@ function GameView({
       evolvedPokemonName = evolved?.nameEs ?? "su siguiente etapa";
     }
     if (levelsGained > 0) {
-      setPlayerHp((current) => current + levelsGained * 5);
+      setPlayerHp((current) => {
+        const next = current + levelsGained * 5;
+        setPartyHp((hpMap) => ({ ...hpMap, [evolvedPokemonId]: next }));
+        return next;
+      });
     }
     setMessage(
       `¡${encounter.nameEs} cayó! ${player.nameEs} ganó ${gained} EXP${levelsGained > 0 ? ` y subió al nivel ${nextLevel}` : ""}${evolvedPokemonName ? ` y evolucionó a ${evolvedPokemonName}` : ""}.`,
@@ -1958,15 +1982,20 @@ function GameView({
     const reducedEnemyDamage = Math.max(1, Math.floor(enemyDamage * stageMultiplier(effectiveEnemyAttackStage)));
     const nextPlayerHp = Math.max(0, playerHp - reducedEnemyDamage);
     setPlayerHp(nextPlayerHp);
+    setPartyHp((current) => ({ ...current, [playerId]: nextPlayerHp }));
+    const stillAlive = teamPokemon.filter((pokemon) => {
+      if (pokemon.id === playerId) return nextPlayerHp > 0;
+      return (partyHp[pokemon.id] ?? maxHpFor(pokemon.id)) > 0;
+    });
     setMessage(
       nextPlayerHp === 0
-        ? reservePokemon.length > 0
+        ? stillAlive.length > 0
           ? `¡${player.nameEs} se debilitó! Elige otro Pokémon.`
           : `¡${encounter.nameEs} debilitó a ${player.nameEs}! ¡Has perdido!`
         : `${playerTurnMessage} ¡${encounter.nameEs} contraataca y causa ${reducedEnemyDamage} PS de daño.`,
     );
     if (nextPlayerHp === 0) {
-      if (reservePokemon.length > 0) setPartyOpen(true);
+      if (stillAlive.length > 0) setPartyOpen(true);
       else setGameOver(true);
     }
   }
@@ -1977,7 +2006,9 @@ function GameView({
     if (item.effect === "heal" && playerHp < playerMaxHp) {
       animateBattleSequence([{ action: "player-heal", duration: 650 }]);
       playBattleHeal();
-      setPlayerHp((current) => Math.min(playerMaxHp, current + item.power));
+      const healed = Math.min(playerMaxHp, playerHp + item.power);
+      setPlayerHp(healed);
+      setPartyHp((current) => ({ ...current, [playerId]: healed }));
       setInventory((current) => current.filter((_, index) => index !== itemIndex));
       setMessage(`${player.nameEs} usó ${item.name}.`);
       setBagOpen(false);
@@ -2037,15 +2068,39 @@ function GameView({
   }
 
   function restartBattle() {
-    setPlayerHp(playerMaxHp);
+    const fullHp: Record<number, number> = {};
+    for (const poke of teamPokemon) {
+      fullHp[poke.id] = maxHpFor(poke.id);
+    }
+    // Also heal any caught not currently in the sliced team view
+    for (const poke of caughtPokemon) {
+      if (fullHp[poke.id] === undefined) fullHp[poke.id] = maxHpFor(poke.id);
+    }
+    setPartyHp(fullHp);
+    const activeId = teamPokemon[0]?.id ?? playerId;
+    setPlayerId(activeId);
+    setPlayerHp(fullHp[activeId] ?? playerMaxHp);
     setGameOver(false);
+    setEnemyDefeated(false);
+    setPartyOpen(false);
+    setBagOpen(false);
+    setChoosingMove(false);
     spawnRandomEncounter();
   }
 
   function choosePokemon(id: number) {
+    if (isFainted(id)) {
+      setMessage(`${CATALOG.find((pokemon) => pokemon.id === id)?.nameEs} está debilitado y no puede combatir.`);
+      return;
+    }
+    // Save current active HP before switching (unless already fainted)
+    if (playerHp > 0) {
+      setPartyHp((current) => ({ ...current, [playerId]: playerHp }));
+    }
+    const restoredHp = hpOf(id);
     animateBattleSequence([{ action: "player-switch", duration: 420 }]);
     setPlayerId(id);
-    setPlayerHp(40 + ((pokemonProgress[id]?.level ?? 5) - 1) * 5);
+    setPlayerHp(restoredHp);
     setMoves([]);
     setPartyOpen(false);
     setMessage(`${CATALOG.find((pokemon) => pokemon.id === id)?.nameEs} entra en combate.`);
@@ -2134,7 +2189,7 @@ function GameView({
 
       <div key={message} className="battle-message">{message}</div>
 
-      {gameOver || (playerHp <= 0 && reservePokemon.length === 0) ? (
+      {gameOver || (playerHp <= 0 && aliveReserve.length === 0) ? (
         <div className="battle-actions">
           <button type="button" onClick={restartBattle} className="btn-press battle-actions__btn battle-actions__btn--primary">Reintentar</button>
           <button type="button" onClick={onMenu} className="btn-press battle-actions__btn">Ir al menú</button>
@@ -2166,12 +2221,32 @@ function GameView({
           {reservePokemon.length === 0 ? (
             <p>No quedan compañeros disponibles.</p>
           ) : (
-            reservePokemon.map((pokemon) => (
-              <button key={pokemon.id} type="button" onClick={() => choosePokemon(pokemon.id)}>
-                <span className="battle-party__entry"><img src={battleSpriteUrl(pokemon.id, "front")} alt="" />{pokemon.nameEs}</span>
-                <span>{pokemon.id === playerId ? "En combate" : "Elegir"}</span>
-              </button>
-            ))
+            reservePokemon.map((pokemon) => {
+              const fainted = isFainted(pokemon.id);
+              const current = hpOf(pokemon.id);
+              const max = maxHpFor(pokemon.id);
+              return (
+                <button
+                  key={pokemon.id}
+                  type="button"
+                  disabled={fainted}
+                  onClick={() => !fainted && choosePokemon(pokemon.id)}
+                  className={fainted ? "opacity-50" : undefined}
+                >
+                  <span className="battle-party__entry">
+                    <img src={battleSpriteUrl(pokemon.id, "front")} alt="" />
+                    {pokemon.nameEs}
+                  </span>
+                  <span>
+                    {fainted
+                      ? "Debilitado"
+                      : pokemon.id === playerId
+                        ? "En combate"
+                        : `${current}/${max} PS`}
+                  </span>
+                </button>
+              );
+            })
           )}
         </div>
       ) : choosingMove ? (
